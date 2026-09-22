@@ -81,18 +81,20 @@ def test_the_queue_is_drained_only_after_the_sensor_has_found_something(dagbag):
 
 
 def test_the_sensor_gives_up_before_the_next_run_is_due(dagbag):
-    """Otherwise `max_active_runs=1` turns a quiet period into a stuck DAG.
-
-    The sensor is the mechanism and the schedule is only a safety net, so each
-    run has to release the slot before the next one is due. Get this backwards
-    and the layer stops draining entirely, quietly, which is the failure mode
-    this project is least entitled to have.
-    """
+    """A quiet queue should time out before the next scheduled run is due."""
     dag = dagbag.dags["reliability_layer"]
     sensor = dag.get_task("wait_for_an_incident")
 
     assert type(sensor).__name__ == "IncidentSensor", "waiting must not hold a worker slot"
-    assert sensor.timeout < dag.timetable.delta.total_seconds()
+    # Airflow 3 uses DeltaTriggerTimetable with a public delta attribute;
+    # Airflow 2 exposes its data-interval schedule through serialize().
+    timetable = dag.timetable
+    interval_seconds = (
+        timetable.delta.total_seconds()
+        if hasattr(timetable, "delta")
+        else timetable.serialize()["delta"]
+    )
+    assert 0 < sensor.timeout < interval_seconds
 
 
 def test_the_cli_and_the_dags_call_the_same_functions():
