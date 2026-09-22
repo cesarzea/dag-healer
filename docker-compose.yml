@@ -1,0 +1,36 @@
+# Airflow plus a fake upstream, for looking at the loop in a UI.
+#
+# Note: the reliability layer falls back to its deterministic backend inside
+# these containers, because Claude Code lives on your machine, not in here. To
+# watch the real diagnosis run, use the no-Docker path in the README.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8099:8099"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx;httpx.get('http://localhost:8099/health').raise_for_status()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  airflow:
+    image: apache/airflow:2.11.0-python3.11
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/repo/dags
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+      PYTHONPATH: /opt/airflow/repo/src
+      SHOP_API_URL: http://api:8099
+      _AIRFLOW_WWW_USER_USERNAME: airflow
+      _AIRFLOW_WWW_USER_PASSWORD: airflow
+    volumes:
+      - .:/opt/airflow/repo
+    ports:
+      - "8080:8080"
+    command: bash -c "airflow db migrate && airflow standalone"

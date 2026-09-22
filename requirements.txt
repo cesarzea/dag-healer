@@ -1,0 +1,7 @@
+# Runtime dependencies for the reliability layer and the fake upstream API.
+# Airflow is installed separately (see requirements-airflow.txt) because it
+# pins a large constraint set that has no business constraining this code.
+httpx>=0.27
+PyYAML>=6.0
+fastapi>=0.110
+uvicorn[standard]>=0.29

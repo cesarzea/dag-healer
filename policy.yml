@@ -1,0 +1,32 @@
+# Operating policy: how much autonomy the reliability layer has, per failure
+# class. Mirrors the autonomy levels in docs/autonomy-levels.md.
+#
+# `auto`             act without asking, then record the change as pending review
+# `auto_then_review` act, but hold the pipeline until a human acknowledges
+# `escalate`         never act, always hand to a human with the evidence
+levels:
+  transient_source_error: auto
+  rate_limited: auto
+  schema_drift_renamed_field: auto_then_review
+  schema_drift_new_field: auto_then_review
+  schema_drift_removed_field: escalate
+  schema_drift_type_change: escalate
+  semantic_change: escalate
+  contract_violation_data_quality: escalate
+  unknown: escalate
+# Actions the layer is allowed to take at all. Anything a diagnosis proposes
+# that is not on this list is refused and escalated, regardless of how
+# confident the diagnosis is.
+allowed_actions:
+  - remap_field
+  - retry
+  - escalate
+# A repair is only accepted if the remapped column still looks like the column
+# it replaces, compared against the last known-good run.
+verification:
+  require_contract_pass: true
+  require_baseline_match: true
+  baseline_tolerance:
+    null_rate_delta: 0.05
+    mean_relative_delta: 0.25
+  min_confidence: 0.6

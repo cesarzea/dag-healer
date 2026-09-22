@@ -1,0 +1,42 @@
+# Data contract for the canonical `orders` entity.
+#
+# This file is the source of truth for what downstream consumers (the
+# personalisation engine, the reporting layer) are allowed to assume.
+# It is deliberately independent of whatever shape the upstream API happens
+# to have today: the mapping layer is what absorbs upstream change.
+#
+# Nothing in the reliability layer is permitted to edit this file.
+entity: orders
+version: 1
+primary_key: order_id
+fields:
+  - name: order_id
+    type: string
+    required: true
+    unique: true
+  - name: created_at
+    type: timestamp
+    required: true
+  - name: currency
+    type: string
+    required: true
+    pattern: "^[A-Z]{3}$"
+  - name: total_amount
+    type: number
+    required: true
+    min: 0
+    max: 1000000
+  - name: customer_id
+    type: string
+    required: false
+  - name: line_items
+    type: integer
+    required: true
+    min: 0
+    max: 1000
+  - name: status
+    type: string
+    required: true
+    allowed: [pending, authorized, paid, partially_refunded, refunded, voided]
+row_expectations:
+  min_rows: 1
