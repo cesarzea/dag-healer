@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """Poll the incident directory without occupying an Airflow worker slot.
 
 `IncidentSensor` defers to the triggerer. An asynchronous loop checks for

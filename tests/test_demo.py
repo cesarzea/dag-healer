@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """The walkthrough must show real results and stop at its promised boundaries."""
 
 from __future__ import annotations

@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 # Airflow is installed separately from the reliability layer, because it pins a
 # large constraint set that has no business constraining this code.
 #

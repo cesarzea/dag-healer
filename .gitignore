@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 .venv/
 __pycache__/
 *.py[cod]
@@ -20,3 +24,10 @@ run.log
 .DS_Store
 .env.*
 !.env.example
+
+# Coverage data from pytest-cov
+.coverage
+coverage.xml
+
+# Context for Claude Code; kept on this machine, not published
+CLAUDE.md

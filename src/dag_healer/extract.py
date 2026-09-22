@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """Talking to the upstream API, and classifying the ways it says no."""
 
 from __future__ import annotations

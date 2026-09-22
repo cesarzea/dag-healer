@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """A scripted backend for reproducible tests of the repair checks.
 
 Negative tests need diagnoses that are wrong in specific ways, which a real

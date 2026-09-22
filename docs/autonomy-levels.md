@@ -1,3 +1,9 @@
+<!--
+DAG-Healer (https://github.com/cesarzea/dag-healer)
+Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+SPDX-License-Identifier: MIT
+-->
+
 # Autonomy levels
 
 Autonomy is granted per failure class, and the deciding question is always the

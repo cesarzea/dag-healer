@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 PY_VERSION := $(shell python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
 AIRFLOW_VERSION := $(shell sed -n 's/^apache-airflow==//p' requirements-airflow.txt)
 CONSTRAINTS := https://raw.githubusercontent.com/apache/airflow/constraints-$(AIRFLOW_VERSION)/constraints-$(PY_VERSION).txt

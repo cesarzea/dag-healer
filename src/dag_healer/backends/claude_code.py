@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """Diagnosis via the Claude Code CLI.
 
 Chosen over a direct API call so the demo runs on a machine that already has
@@ -178,12 +182,20 @@ def _run_cli(command: list[str], timeout: float) -> subprocess.CompletedProcess:
     return completed
 
 
+# Maximum effort on this model was observed at 131.64s for one diagnosis
+# (docs/observations/subtotal-opus-5-5-max.json). The old 180s limit left a
+# quarter of that as margin, so one slow run would time out in the middle of
+# the phase that matters most. Waiting longer costs a few WAITING lines;
+# timing out costs the demonstration.
+DEFAULT_TIMEOUT_SECONDS = 600.0
+
+
 class ClaudeCodeBackend(LLMBackend):
     name = "claude-code"
     model = "claude-opus-5-5"
     effort = "max"
 
-    def __init__(self, binary: str | None = None, timeout: float = 180.0) -> None:
+    def __init__(self, binary: str | None = None, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> None:
         self.binary = binary or os.environ.get("CLAUDE_BIN", "claude")
         self.timeout = timeout
 
@@ -198,7 +210,7 @@ class ClaudeCodeBackend(LLMBackend):
         if not self.available():
             raise RuntimeError(
                 f"'{self.binary}' not found on PATH. Install Claude Code, or set "
-                "CLAUDE_BIN, or run with --backend mock."
+                "CLAUDE_BIN."
             )
 
         prompt = self.build_prompt(incident)

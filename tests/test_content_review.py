@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """Exercise historical content evidence and the healer's shared response boundary.
 
 CLI responses here are controlled. These tests do not measure a live model's

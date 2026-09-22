@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 # Make the upstream API misbehave, the way a merchant would without telling you.
 #
 #   ./scripts/inject_failure.sh rename    # total_price -> order_total

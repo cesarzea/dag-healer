@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """The pipeline DAG.
 
 `run_ingest` files a structured incident when the data contract fails, then
@@ -39,7 +43,10 @@ DAG_ID = "orders_ingest"
     start_date=pendulum.datetime(2026, 9, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,
-    default_args={"retries": 1, "retry_delay": timedelta(minutes=1)},
+    # Airflow's default delay. A retry only helps if something can change
+    # before it runs; five minutes leaves time for a diagnosis and repair,
+    # which take one to two minutes with a live model.
+    default_args={"retries": 1, "retry_delay": timedelta(minutes=5)},
     tags=["ingest", "orders"],
     doc_md=__doc__,
 )

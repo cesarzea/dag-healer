@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """The reliability layer DAG.
 
 Drains the incident queue. For each pending incident it produces a diagnosis,
@@ -16,6 +20,7 @@ polling, not a distributed event bus. See `dag_healer.triggers`.
 
 from __future__ import annotations
 
+import logging
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -45,6 +50,8 @@ from dag_healer.triggers import IncidentSensor  # noqa: E402
 
 DAG_ID = "reliability_layer"
 
+log = logging.getLogger(__name__)
+
 # Each scheduled run arms a deferred sensor that polls until an incident
 # appears or its timeout expires. The timeout leaves thirty seconds before
 # the next scheduled run; scheduling delays can extend that gap. Detection
@@ -56,9 +63,9 @@ SENSOR_GIVE_UP_AFTER = SCHEDULE_SECONDS - 30
 def _backend():
     """Claude Code if it is on PATH, otherwise the deterministic stand-in.
 
-    Falling back rather than failing keeps this runnable in CI and in the
-    containers, where there is no model and no need for one: what is being
-    exercised is the gates.
+    The Airflow image installs Claude Code, so the container diagnoses with
+    the model. CI has no model and falls back rather than failing, because
+    what the tests exercise there is the gates.
     """
     from dag_healer.backends.claude_code import ClaudeCodeBackend
     from dag_healer.backends.mock import MockBackend
@@ -99,11 +106,14 @@ def reliability_layer():
             resolution = heal(incident_path, settings, backend, policy)
             outcomes[resolution.outcome] = outcomes.get(resolution.outcome, 0) + 1
             outcomes["changed"] += int(resolution.changed)
-            print(f"[{resolution.incident_id}] {resolution.summary()}")
             # Every gate, not only the objections: a task log that records what
             # was verified is the difference between an audit trail and a claim.
+            # Logged rather than printed: Airflow stamps captured stdout after
+            # the task's own "Done" line, and its log view then folds the last
+            # checks into the collapsed post-execute section.
+            log.info("[%s] %s", resolution.incident_id, resolution.summary())
             for check in resolution.checks:
-                print(f"    {check}")
+                log.info("    %s", check)
 
         return outcomes
 

@@ -1,3 +1,9 @@
+<!--
+DAG-Healer (https://github.com/cesarzea/dag-healer)
+Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+SPDX-License-Identifier: MIT
+-->
+
 # Engineering rationale: reliable merchant integrations
 
 This proof of concept explores recurring failures in data pipelines. Its
@@ -24,7 +30,7 @@ cannot establish that an import preserved the meaning of the data.
 `orders_ingest` has one TaskFlow task, `validate_and_load`, which calls
 `run_ingest`. Extraction, mapping, validation and loading happen inside that
 task. They are not four separate Airflow tasks. Its schedule is every fifteen
-minutes, with one task retry after a minute and `max_active_runs=1`.
+minutes, with one task retry after five minutes and `max_active_runs=1`.
 
 `reliability_layer` is a separate DAG:
 
@@ -45,7 +51,8 @@ distributed event bus.
 The guided script executes the shared Python functions directly and pauses
 between phases. Its timestamps, call durations, HTTP activity and file-write
 traces come from that execution. Running Docker Compose exercises the actual
-scheduler and DAG task dependencies with the mock diagnosis backend.
+scheduler and DAG task dependencies, with Claude Code diagnosing inside the
+Airflow container.
 
 ## What to inspect in each phase
 

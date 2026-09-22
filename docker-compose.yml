@@ -1,14 +1,17 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 # Airflow plus a fake upstream, for looking at the loop in a UI.
 #
-# Note: the reliability layer falls back to its deterministic backend inside
-# these containers, because Claude Code lives on your machine, not in here. To
-# watch the real diagnosis run, use scripts/demo.sh: diagnosis stays on the
-# host even when the script starts the fake API in Docker.
+# The repair DAG diagnoses with Claude Code inside the Airflow container. It
+# needs a token from `claude setup-token` in .env as CLAUDE_CODE_OAUTH_TOKEN.
+# Git ignores .env, so the token never enters the repository.
 services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: fake_shop_api/Dockerfile
     ports:
       - "127.0.0.1:8099:8099"
     healthcheck:
@@ -18,7 +21,7 @@ services:
       retries: 10
 
   airflow:
-    image: apache/airflow:3.3.2
+    build: docker/airflow
     depends_on:
       api:
         condition: service_healthy
@@ -28,6 +31,9 @@ services:
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
       PYTHONPATH: /opt/airflow/repo/src
       SHOP_API_URL: http://api:8099
+      # Optional here so `docker compose up api`, which the host demo uses,
+      # still works without a token. Without one, diagnosis in Airflow fails.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       # Open the UI with no login. `airflow standalone` otherwise creates an
       # `admin` user with a random password written to a file inside the
       # container, which is a poor first five minutes for anyone who just

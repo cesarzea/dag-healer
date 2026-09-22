@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """A deliberately unhelpful stand-in for a merchant's order API.
 
 It behaves like the real thing in the way that matters here: it can change its

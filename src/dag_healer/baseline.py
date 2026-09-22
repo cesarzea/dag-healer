@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """Profiles of the last known-good run, used to catch plausible-but-wrong repairs.
 
 Passing the contract is necessary but not sufficient. If the upstream renames

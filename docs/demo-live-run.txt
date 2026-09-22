@@ -1,0 +1,1592 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+#
+# Complete console output of a live run of the demo, recorded on 2026-09-22
+# with `./scripts/demo.sh --no-pause`, Claude Code 2.1.280, model
+# claude-opus-5-5, effort max. Reproduced as printed, without edits.
+
+
+  Before the walkthrough: check Docker and the fake orders API.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:21:34.258 dag_healer.startup._query
+    CHECK docker info --format '{{.ServerVersion}}'
+  ------------------------------------------------------------------------
+
+  Docker:
+    Docker Engine 29.7.2 is responding.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:21:34.333 dag_healer.startup.api_status
+    CHECK fake API: GET http://127.0.0.1:8099/health and /admin/state
+  ------------------------------------------------------------------------
+
+  Fake API:
+    http://127.0.0.1:8099: health and demo fault controls are ready.
+
+  Services are ready. The walkthrough calls the DAGs' Python functions
+  directly; it does not require an Airflow scheduler.
+
+  ------------------------------------------------------------------------
+
+  DAG-HEALER | Pipeline repair: diagnosis, checks and limits
+
+  Investigating and resolving data pipeline problems takes engineering time:
+  understanding what failed, gathering evidence and deciding what to change.
+  This proof of concept (POC) demonstrates how AI can help with that process
+  in pipelines orchestrated by Apache Airflow. An Airflow DAG defines a
+  workflow's tasks and the dependencies between them. The AI uses failure
+  evidence to diagnose a problem and propose a repair that code can
+  evaluate.
+
+  To make that idea concrete, this demo implements one limited example: a
+  simulated orders API renames a field, the import used by an Airflow DAG
+  fails, and a separate repair workflow evaluates a proposed field mapping.
+  This is one example of AI-assisted problem resolution; the implementation
+  covers only this narrow scenario.
+
+  The workflow, verification rules and infrastructure are built for this
+  POC. They are not designed or validated as a production solution. You will
+  see a successful recovery, a rejected wrong proposal and a wrong mapping
+  that the implemented checks accept, making both the potential and the
+  limits visible.
+
+  The data:
+    One simulated shop with an orders API and a local SQLite warehouse. The
+    import translates API fields into a stable reporting format.
+
+  Why orders:
+    Order totals and delivery charges are both numbers, but they mean
+    different things. Confusing them would distort revenue reports even if
+    the import finished successfully.
+
+  Diagnosis backend:
+    Claude Code supplies one live AI diagnosis using claude-opus-5-5 with
+    effort=max (Opus 5.5, maximum reasoning effort).
+
+  The execution:
+    This script calls the same Python functions as the two Airflow DAGs in
+    the repository, advancing on Return. It does not start an Airflow
+    scheduler.
+
+  The traces:
+    Blocks labeled 'Execution trace' contain live output from the running
+    Python code. Each TRACE header identifies the time and function; the
+    indented message below it describes the operation. START/END records
+    show real calls and elapsed time. The closing line of dashes separates
+    these records from the explanation or result that follows.
+
+  The walkthrough has eight phases, in this order. Press Return after each
+  phase to continue.
+
+  Phase 1: establish the healthy reference
+    Reset the demo's mapping, incidents, reference statistics and database.
+    Import healthy orders and save their statistics and selected content
+    examples for later comparison.
+
+  Phase 2: change the source API
+    Rename the order amount field in the simulated API while leaving its
+    values unchanged. The import's mapping still expects the old name.
+
+  Phase 3: observe the failed import
+    Run the import again. It stops before loading the invalid batch and
+    saves an incident containing evidence of the failure.
+
+  Phase 4: diagnose and propose
+    Claude Code interprets the evidence, assesses the field's content and
+    proposes an action. Inspect its explanation before continuing; the
+    mapping has not changed yet.
+
+  Phase 5: verify and apply
+    Python evaluates the proposal against policy and data checks. It applies
+    the mapping change only if the required checks pass. Passing these POC
+    checks does not prove equivalent meaning.
+
+  Phase 6: verify the recovered import
+    Run the import with the accepted mapping and inspect the loaded data.
+    The change remains pending human review.
+
+  Phase 7: reject a wrong proposal
+    Supply a deliberately wrong mapping to shipping_price, the delivery
+    charge. Show how the historical comparison rejects it despite valid
+    types and ranges.
+
+  Phase 8: expose a verification limit
+    Use two supplied diagnoses on an isolated copy: classifying a subtotal
+    as a semantic change blocks the repair, but misclassifying it as a
+    rename lets wrong amounts pass the implemented checks and load.
+
+  ========================================================================
+  PHASE 1/8 | Run the orders_ingest task on healthy data
+  ========================================================================
+
+  Who acts:
+    The demo executes the function used by orders_ingest.validate_and_load.
+
+  Import DAG:
+    orders_ingest: validate_and_load (@task) calls run_ingest to extract,
+    map, validate and load orders.
+
+  Airflow settings:
+    Scheduled every 15 minutes; max_active_runs=1 prevents overlapping runs
+    of this DAG. A failed task has one retry after five minutes.
+
+  First we reset the local demo data and inspect the healthy API response.
+  The next trace block shows this preparation: reset_demo restores the
+  starting state, then fetch_raw reads the orders. We will run the import
+  after explaining how those source fields map to the reporting data.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:21:34.362 dag_healer.demo.execute
+    START reset_demo
+  TRACE 22:21:34.384 dag_healer.demo.execute
+    END reset_demo -> completed in 21.4 ms
+  TRACE 22:21:34.384 dag_healer.demo.execute
+    START fetch_raw: inspect the healthy API
+  TRACE 22:21:34.384 dag_healer.extract.fetch_raw
+    GET http://127.0.0.1:8099/admin/api/orders.json (up to 3 attempts; a
+    retry verifies itself)
+  TRACE 22:21:34.396 dag_healer.extract.fetch_raw
+    upstream returned 120 records
+  TRACE 22:21:34.396 dag_healer.demo.execute
+    END fetch_raw: inspect the healthy API -> completed in 11.3 ms
+  ------------------------------------------------------------------------
+
+  The shop calls the order amount 'total_price'. Our reporting model calls
+  it 'total_amount'. That stable name is the canonical field: shared SQL
+  reports can use it across merchants. A mapping connects each source field
+  to that name.
+
+  Mapping rule:
+    Read total_price from the shop and save it as total_amount.
+
+  Data contract:
+    Rules every import must meet. For example: the order amount must be
+    present, numeric and between 0 and 1,000,000.
+
+  Example order:
+    ord_10000: total_price = 381.46
+
+  Inside the task:
+    fetch_raw issues an HTTP GET; Mapping.apply projects source keys onto
+    canonical names; contracts.validate checks required values, types,
+    ranges and uniqueness before any load.
+
+  Running the import: fetch orders, translate field names, check the rules,
+  then save valid data...
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:21:34.396 dag_healer.demo.execute
+    START run_ingest: healthy import
+  TRACE 22:21:34.397 dag_healer.pipeline.run_ingest
+    contract loaded: 7 canonical fields downstream depends on
+  TRACE 22:21:34.398 dag_healer.pipeline.run_ingest
+    mapping v1 loaded: this is where upstream change is absorbed
+  TRACE 22:21:34.398 dag_healer.extract.fetch_raw
+    GET http://127.0.0.1:8099/admin/api/orders.json (up to 3 attempts; a
+    retry verifies itself)
+  TRACE 22:21:34.409 dag_healer.extract.fetch_raw
+    upstream returned 120 records
+  TRACE 22:21:34.409 dag_healer.pipeline.run_ingest
+    projected 120 records onto the canonical field names
+  TRACE 22:21:34.409 dag_healer.pipeline.run_ingest
+    checking the mapped records against the contract
+  TRACE 22:21:34.409 dag_healer.pipeline.run_ingest
+    contract satisfied; loading
+  TRACE 22:21:34.410 dag_healer.pipeline.load_to_warehouse
+    SQL BEGIN /Users/cesarzea/Documents/dag-healer/data/warehouse.sqlite:
+    full refresh of orders with 120 rows
+  TRACE 22:21:34.411 dag_healer.pipeline.load_to_warehouse
+    SQL COMMIT /Users/cesarzea/Documents/dag-healer/data/warehouse.sqlite:
+    120 rows loaded into orders
+  TRACE 22:21:34.411 dag_healer.pipeline.run_ingest
+    profiling 7 columns to record what a good run looks like
+  TRACE 22:21:34.411 dag_healer.baseline.save_baseline
+    WRITE /Users/cesarzea/Documents/dag-
+    healer/baselines/orders.baseline.json: saved profiles for order_id,
+    created_at, currency, total_amount, customer_id, line_items, status
+  TRACE 22:21:34.411 dag_healer.demo.execute
+    END run_ingest: healthy import -> completed in 15.2 ms
+  TRACE 22:21:34.411 dag_healer.demo.warehouse_snapshot
+    SQL READ /Users/cesarzea/Documents/dag-healer/data/warehouse.sqlite ->
+    orders=120, SUM(total_amount)=27895.24
+  ------------------------------------------------------------------------
+
+  RESULT: LOADED
+    120 orders saved in the reporting database.
+
+  Reference mean:
+    232.46 per order; 0% missing amounts.
+
+  Saved examples:
+    total_amount: [381.46, 223.66, 294.19]. The contract enables
+    sample_for_diagnosis for this field so a later diagnosis can inspect
+    previous values.
+
+  These saved statistics are the baseline: our reference for what valid data
+  looked like. Later, a proposed replacement must resemble this column.
+
+  ========================================================================
+  PHASE 2/8 | The shop renames the amount field
+  ========================================================================
+
+  Who acts:
+    The demo changes the fake shop, simulating a provider update.
+
+  We rename 'total_price' to 'order_total' in the API response. The order
+  amounts stay the same. The pipeline's mapping still uses the old name.
+
+  Fault injection:
+    POST /admin/state sets rename_total_price=true. The fake API then emits
+    order_total instead of total_price on each GET /admin/api/orders.json.
+    This switch belongs to the demo, not to the repair system.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:21:34.412 dag_healer.demo.execute
+    START POST /admin/state: rename_total_price=true
+  TRACE 22:21:34.422 dag_healer.demo.execute
+    END POST /admin/state: rename_total_price=true -> completed in 10.6 ms
+  TRACE 22:21:34.422 dag_healer.demo.run_demo
+    API state update -> HTTP 200
+  TRACE 22:21:34.422 dag_healer.demo.execute
+    START fetch_raw: inspect the changed API
+  TRACE 22:21:34.422 dag_healer.extract.fetch_raw
+    GET http://127.0.0.1:8099/admin/api/orders.json (up to 3 attempts; a
+    retry verifies itself)
+  TRACE 22:21:34.433 dag_healer.extract.fetch_raw
+    upstream returned 120 records
+  TRACE 22:21:34.433 dag_healer.demo.execute
+    END fetch_raw: inspect the changed API -> completed in 10.7 ms
+  ------------------------------------------------------------------------
+
+  Same order:
+    ord_10000
+
+  API before:
+    total_price = 381.46
+
+  API now:
+    order_total = 381.46; total_price is absent.
+
+  Also present:
+    shipping_price = 8.07: delivery charges, a different amount.
+
+  RESULT: MISMATCH
+    The job will ask for total_price, but the shop now sends order_total.
+
+  ========================================================================
+  PHASE 3/8 | The import task raises a contract failure
+  ========================================================================
+
+  Who acts:
+    orders_ingest's task function detects the problem and records evidence.
+
+  Running the same import again. It still reads the amount from the old API
+  field, so the reporting amount becomes empty.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:21:34.433 dag_healer.demo.execute
+    START run_ingest: import after the API rename
+  TRACE 22:21:34.435 dag_healer.pipeline.run_ingest
+    contract loaded: 7 canonical fields downstream depends on
+  TRACE 22:21:34.435 dag_healer.pipeline.run_ingest
+    mapping v1 loaded: this is where upstream change is absorbed
+  TRACE 22:21:34.435 dag_healer.extract.fetch_raw
+    GET http://127.0.0.1:8099/admin/api/orders.json (up to 3 attempts; a
+    retry verifies itself)
+  TRACE 22:21:34.446 dag_healer.extract.fetch_raw
+    upstream returned 120 records
+  TRACE 22:21:34.446 dag_healer.pipeline.run_ingest
+    projected 120 records onto the canonical field names
+  TRACE 22:21:34.446 dag_healer.pipeline.run_ingest
+    checking the mapped records against the contract
+  TRACE 22:21:34.447 dag_healer.pipeline.run_ingest
+    2 violation(s); nothing will be loaded
+  TRACE 22:21:34.447 dag_healer.pipeline.run_ingest
+    gathering evidence now, while it still exists: contract, mapping,
+    violations, upstream fields, redacted samples, last known-good profile
+  TRACE 22:21:34.447 dag_healer.incident.save
+    WRITE /Users/cesarzea/Documents/dag-
+    healer/incidents/inc_20260922T212134_360844.json:
+    incident=inc_20260922T212134_360844, violations=2, samples=3
+  TRACE 22:21:34.447 dag_healer.demo.execute
+    END run_ingest: import after the API rename ->
+    ContractViolationWithIncident after 14.2 ms
+  TRACE 22:21:34.448 dag_healer.demo.warehouse_snapshot
+    SQL READ /Users/cesarzea/Documents/dag-healer/data/warehouse.sqlite ->
+    orders=120, SUM(total_amount)=27895.24
+  ------------------------------------------------------------------------
+
+  RESULT: STOPPED
+    The required order amount is missing. The import refuses this batch.
+
+  Task identity:
+    dag_id=orders_ingest; task_id=validate_and_load; mapping_version=1.
+
+  Failure labels:
+    missing_source_field, null_in_required_field
+
+  missing_source_field means the API no longer sends the configured source.
+  null_in_required_field means that absence left a required reporting value
+  empty. Retrying the unchanged mapping cannot restore the missing field.
+
+  Database:
+    Still holds the 120 orders from phase 1; the failed batch was not
+    loaded.
+
+  The pipeline saves an incident: a file of evidence another process can
+  read to diagnose the failure. Here is what it captured:
+
+  Missing source:
+    total_price
+
+  Fields received:
+    created_at, currency, customer_id, financial_status, id,
+    line_items_count, order_total, shipping_price
+
+  More evidence:
+    3 sample orders, the failed rules, the mapping and the reference
+    statistics.
+
+  Inside the task:
+    incident.build captures evidence while the response is in memory;
+    Incident.save writes JSON; ContractViolationWithIncident is then raised.
+    Selected top-level sensitive sample fields are redacted by name.
+
+  The incident directory connects the two DAGs. orders_ingest records the
+  failure and raises an exception; it does not import the healer or call the
+  repair DAG. Airflow can retry the task, while the separate
+  reliability_layer reads the evidence. Saving an incident does not itself
+  send an alert or open a ticket.
+
+  ========================================================================
+  PHASE 4/8 | reliability_layer requests a diagnosis
+  ========================================================================
+
+  Who acts:
+    The repair workflow uses Claude Code.
+
+  Repair DAG:
+    wait_for_an_incident -> drain_incident_queue -> anything_repaired ->
+    rerun_orders_ingest.
+
+  wait_for_an_incident uses IncidentSensor. When the queue is empty, it
+  defers to Airflow's triggerer, whose asynchronous loop checks for
+  unresolved files every five seconds. Waiting does not occupy a worker
+  slot. drain_incident_queue then processes the evidence; the LLM is called
+  for diagnosis, not to poll for failures.
+
+  The diagnosis receives the evidence saved in phase 3: what failed, which
+  fields the shop sent and what the amounts looked like before. It is asked
+  to explain the failure and propose at most one change.
+
+  Claude Code must compare historical content examples with the candidate's
+  current values and the contract's description. Product descriptions should
+  still describe products; a subtotal must not be mistaken for an order
+  total just because both are numbers. Its answer includes a content_check
+  verdict, two content summaries and a reason.
+
+  In phase 5, the healer requires every remap to carry a complete
+  equivalent-content assessment for the proposed fields, with available old
+  and new examples. This content gate applies to Claude Code, supplied
+  diagnoses and future backends. The backend only returns the answer; the
+  healer records a PASS or STOP without rewriting what the diagnosis source
+  said.
+
+  This requirement blocks missing evidence and an assessment that admits
+  uncertainty, but a confident, incorrect equivalent verdict can pass.
+  Requiring the assessment is a rule for accepting a proposal, not
+  independent proof of its meaning.
+
+  Backend contract:
+    LLMBackend.diagnose returns a Diagnosis: cause_class, ownership,
+    confidence and proposed_action. The Claude Code backend implements this
+    interface.
+
+  ClaudeCodeBackend starts a subprocess: claude -p <evidence prompt> --model
+  claude-opus-5-5 --effort max --output-format json --restricted --tools ""
+  --strict-mcp-config. The model and reasoning effort are selected
+  explicitly. The CLI is configured without tools; its JSON answer is parsed
+  into a Diagnosis. These CLI restrictions are not an operating-system
+  sandbox.
+
+  Calling Claude Code now to classify the failure, compare the content
+  examples and propose an action. The demo waits for the CLI's complete JSON
+  answer, so no partial answer is displayed. A WAITING message appears every
+  five seconds with elapsed time and the timeout; it reports the wait, not
+  how much of the model's work is complete. No input is needed. Press Ctrl+C
+  to cancel.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:21:34.448 dag_healer.demo.execute
+    START claude-code.diagnose: inc_20260922T212134_360844
+  TRACE 22:21:34.448 dag_healer.backends.claude_code.diagnose
+    MODEL | Requesting claude-opus-5-5 with effort=max
+  TRACE 22:21:34.448 dag_healer.backends.claude_code.diagnose
+    running with no tools at all: --restricted --tools "" --strict-mcp-
+    config
+  TRACE 22:21:34.449 dag_healer.backends.claude_code.diagnose
+    calling claude -p <8896 chars> --model claude-opus-5-5 --effort max
+    --output-format json
+  TRACE 22:21:34.449 dag_healer.backends.claude_code._run_cli
+    WAITING | Starting Claude Code; collecting its complete JSON answer.
+    Status updates every 5s; timeout 600s. No input is needed.
+  TRACE 22:21:39.451 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 5s elapsed, 600s timeout. No
+    input is needed; Ctrl+C cancels.
+  TRACE 22:21:44.456 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 10s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:21:49.461 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 15s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:21:54.466 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 20s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:21:59.471 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 25s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:04.472 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 30s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:09.477 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 35s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:14.481 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 40s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:19.485 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 45s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:24.491 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 50s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:29.496 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 55s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:34.501 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 60s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:39.503 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 65s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:44.508 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 70s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:49.511 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 75s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:54.516 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 80s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:22:59.518 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 85s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:23:04.524 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 90s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:23:09.529 dag_healer.backends.claude_code.report_wait
+    WAITING | Claude Code has not returned yet: 95s elapsed, 600s timeout.
+    No input is needed; Ctrl+C cancels.
+  TRACE 22:23:11.663 dag_healer.backends.claude_code._run_cli
+    RESPONSE RECEIVED | Claude Code finished after 97.2s; checking its
+    output before accepting a diagnosis.
+  TRACE 22:23:11.663 dag_healer.backends.claude_code.diagnose
+    Claude Code returned 4234 chars; extracting the diagnosis object
+  TRACE 22:23:11.664 dag_healer.demo.execute
+    END claude-code.diagnose: inc_20260922T212134_360844 -> completed in
+    97215.3 ms
+  ------------------------------------------------------------------------
+
+  Failure class:
+    schema_drift_renamed_field
+
+  Meaning:
+    An API field appears to have been renamed.
+
+  Explanation:
+    The upstream orders API no longer returns 'total_price', the source for
+    the required field 'total_amount', so the field is null in all 120
+    records. The API now returns 'order_total', whose sampled values look
+    like the same order-level totals, so this appears to be a provider-side
+    rename that also caused the null violation.
+
+  Ownership:
+    provider: the diagnosis's suggested responsible party, not a verified
+    assignment.
+
+  Action:
+    remap_field: change where one existing reporting field reads its value.
+
+  Proposed rule:
+    Read reporting field 'total_amount' from API field 'order_total'.
+
+  Reason:
+    Repoint total_amount from the removed 'total_price' to 'order_total',
+    the only plausible source. Its name and sampled values fit the
+    contract's order-total meaning and the historical examples, while
+    shipping_price is a delivery charge the contract excludes. The
+    null_in_required_field violation comes from the missing source and
+    should clear when the contract is re-validated.
+
+  Confidence:
+    85%, reported by the diagnosis source. It is a claim, not a test result.
+
+  Content verdict:
+    equivalent: an assessment supplied by the diagnosis source, not an
+    independent semantic test.
+
+  Previous content:
+    Three historical total_amount examples from a previous successful
+    import: 381.46, 223.66, 294.19. The baseline over 120 records has no
+    nulls, 120 distinct values, mean 232.46 and range 28.60 to 417.79.
+
+  Current content:
+    Three current order_total values: 381.46, 223.66, 294.19. These are
+    order-level fields on EUR orders. The only other unmapped field,
+    shipping_price, has 8.07, 6.63 and 5.50.
+
+  Content reason:
+    The contract defines total_amount as the order total used for revenue
+    reporting, not a subtotal or delivery charge. The order_total samples
+    are order-level amounts on the same two-decimal, major-unit scale as the
+    history and fall inside the historical range. The three historical
+    example values also reappear among them, which fits an unchanged total
+    scope better than a subtotal with shipping split out. shipping_price is
+    a delivery charge, which the contract excludes, and its values are far
+    below the historical minimum of 28.60, so it is not a plausible
+    alternative. Limitations: there are only three unpaired examples per
+    side, so this is not a record-level match. No historical currency value
+    was supplied. The samples cannot confirm that tax, discounts and
+    shipping are included exactly as before.
+
+  RESULT: PROPOSED
+    The answer has been received. The field mapping has not changed yet.
+
+  Return only advances the demonstration. It does not approve the repair;
+  the next phase runs the checks that make that decision.
+
+  ========================================================================
+  PHASE 5/8 | Verify the repair within drain_incident_queue
+  ========================================================================
+
+  Who acts:
+    The healer's Python checks evaluate the diagnosis before applying it.
+
+  An engineer defines the automation rules in advance. They are stored in
+  policy.yml, a configuration file specifying which failures may be
+  repaired, which actions are allowed and how a repair must be checked.
+
+  The policy uses the cause_class supplied by the diagnosis. semantic_change
+  forces escalation, but Python does not independently establish that
+  classification. A semantic change mislabeled as a rename can reach the
+  data checks; phase 8 demonstrates that gap.
+
+  Five gates run in order: policy, allowlist, structure, content and
+  evidence. The content gate checks the assessment's completeness, field
+  names, equivalent verdict and available samples before the trial import. A
+  STOP escalates the proposal and leaves the mapping unchanged.
+
+  The trial import fetches fresh orders using the proposed mapping without
+  saving them to the reporting database. It checks the data contract, then
+  compares the proposed amounts with the healthy reference from phase 1.
+
+  Inside the healer:
+    Mapping.with_remap creates a candidate in memory. dry_run fetches and
+    validates with that candidate; baseline.compare checks the remapped
+    column. Mapping.save writes the change only after the required checks
+    pass.
+
+  The replacement must still be numeric. Its mean may move by at most 25%,
+  and its missing-value rate by at most 5 percentage points. A failed check
+  stops the repair.
+
+  These statistics can reject some wrong substitutions. Similar statistics
+  do not establish equivalent meaning, and a fixed tolerance can also reject
+  legitimate variation. This POC has no measured false-acceptance or false-
+  escalation rate.
+
+  Running the checks now...
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.666 dag_healer.demo.execute
+    START heal: inc_20260922T212134_360844
+  TRACE 22:23:11.666 dag_healer.healer.heal
+    incident inc_20260922T212134_360844 loaded
+  TRACE 22:23:11.666 dag_healer.healer.heal
+    asking backend 'claude-code' for a diagnosis; its answer is a
+    hypothesis, not an instruction
+  TRACE 22:23:11.666 dag_healer.demo.diagnose
+    REUSE captured diagnosis for inc_20260922T212134_360844:
+    cause=schema_drift_renamed_field, action=remap_field; no new model call
+  TRACE 22:23:11.666 dag_healer.healer.heal
+    diagnosis received; mapping proposals must pass five gates
+  TRACE 22:23:11.666 dag_healer.healer.heal
+    gate 1 of 5, policy: is this class of failure one we agreed to automate?
+  TRACE 22:23:11.666 dag_healer.healer.heal
+    gate 2 of 5, allowlist: is the proposed action one of the few we can
+    perform?
+  TRACE 22:23:11.666 dag_healer.healer.heal
+    gate 3 of 5, structure: does the action make sense against the mapping
+    and the payload?
+  TRACE 22:23:11.666 dag_healer.healer.heal
+    gate 4 of 5, content: does this remap have a complete assessment and
+    actual content examples?
+  TRACE 22:23:11.666 dag_healer.healer._content_checks
+    CONTENT CHECK PASS | complete equivalent-content assessment matches the
+    proposed fields and has old and new examples; its semantic truth is not
+    independently verified
+  TRACE 22:23:11.666 dag_healer.healer.heal
+    gate 5 of 5, evidence: running the whole pipeline with the candidate
+    mapping to try to disprove it
+  TRACE 22:23:11.667 dag_healer.pipeline.dry_run
+    dry run: fetching and mapping with the candidate, loading nothing
+  TRACE 22:23:11.670 dag_healer.extract.fetch_raw
+    GET http://127.0.0.1:8099/admin/api/orders.json (up to 3 attempts; a
+    retry verifies itself)
+  TRACE 22:23:11.682 dag_healer.extract.fetch_raw
+    upstream returned 120 records
+  TRACE 22:23:11.682 dag_healer.healer._evidence_checks
+    comparing 'total_amount' against the last known-good profile: this is
+    what catches a repair that passes the contract and is still wrong
+  TRACE 22:23:11.682 dag_healer.healer.heal
+    every gate passed; writing mapping v2
+  TRACE 22:23:11.682 dag_healer.mapping.save
+    writing orders.mapping.yml at v2, keeping the header a human wrote
+  TRACE 22:23:11.683 dag_healer.queue.record
+    recording the outcome and every gate result beside the incident
+  TRACE 22:23:11.683 dag_healer.queue.record
+    WRITE /Users/cesarzea/Documents/dag-
+    healer/incidents/inc_20260922T212134_360844.resolution.json:
+    outcome=repaired, checks=9
+  TRACE 22:23:11.684 dag_healer.demo.execute
+    END heal: inc_20260922T212134_360844 -> completed in 18.0 ms
+  ------------------------------------------------------------------------
+
+  1. policy | May this kind of failure be repaired automatically?
+
+  PASS:
+    policy.yml assigns schema_drift_renamed_field to 'auto_then_review':
+    verify the repair, apply it, then record the change for human review.
+
+  PASS:
+    The proposal reports 85% confidence; the required minimum is 60%.
+    Confidence only permits evaluation to continue.
+
+  2. allowlist | Is this action in the list of permitted operations?
+
+  PASS:
+    remap_field is allowed. The permitted actions are: remap_field (repoint
+    one existing reporting field); retry (try the import again); escalate
+    (refer the problem to a person).
+
+  3. structure | Do the field names support the proposed mapping?
+
+  PASS:
+    'total_amount' already exists in our reporting format.
+
+  PASS:
+    The shop did send a field called 'order_total'.
+
+  PASS:
+    'order_total' is free to use: no other reporting field reads from it.
+
+  4. content | Is the assessment complete and supported by available
+  samples?
+
+  PASS:
+    complete equivalent-content assessment matches the proposed fields and
+    has old and new examples; its semantic truth is not independently
+    verified
+
+  5. evidence | Does a trial import pass BOTH data checks?
+
+  PASS:
+    a run with the candidate mapping passes the required-field, type and
+    value rules (120 rows, 0 broken rules)
+
+  PASS:
+    'total_amount' mean order amount 232.46 -> 232.46 (0% away), missing-
+    value rate 0.00% -> 0.00%, inside a 25% tolerance
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.685 dag_healer.demo.run_demo
+    READ /Users/cesarzea/Documents/dag-healer/mappings/orders.mapping.yml ->
+    version=2, fields={'order_id': 'id', 'created_at': 'created_at',
+    'currency': 'currency', 'total_amount': 'order_total', 'customer_id':
+    'customer_id', 'line_items': 'line_items_count', 'status':
+    'financial_status'}
+  ------------------------------------------------------------------------
+
+  RESULT: APPLIED
+    Every required check passed. The repair layer saved the new mapping.
+
+  Before:
+    Read total_amount from API field total_price.
+
+  After:
+    Read total_amount from API field order_total.
+
+  Change record:
+    Mapping version 1 -> 2; history records the old source, new source, time
+    and reason.
+
+  The edit changes where an existing reporting field gets its value. The
+  reporting format and its validation rules stay the same.
+
+  ========================================================================
+  PHASE 6/8 | Rerun orders_ingest with the accepted mapping
+  ========================================================================
+
+  Who acts:
+    The demo calls the import function again to check recovery.
+
+  In Airflow, rerun_orders_ingest uses TriggerDagRunOperator to request
+  another run of orders_ingest. That run loads the repaired data; a
+  verification trial alone does not update the warehouse. A new DAG run also
+  preserves the earlier attempt's execution history.
+
+  The shop still sends 'order_total'. Now the mapping knows where to read
+  the amount, so we run a real import that saves the data.
+
+  Inside the load:
+    load_to_warehouse replaces the orders table contents in a SQLite
+    transaction. After a successful load, the column profiles replace the
+    saved baseline. This is a local full-refresh load: every successful
+    import replaces the entire orders snapshot.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.685 dag_healer.demo.execute
+    START run_ingest: recovery import
+  TRACE 22:23:11.686 dag_healer.pipeline.run_ingest
+    contract loaded: 7 canonical fields downstream depends on
+  TRACE 22:23:11.687 dag_healer.pipeline.run_ingest
+    mapping v2 loaded: this is where upstream change is absorbed
+  TRACE 22:23:11.687 dag_healer.extract.fetch_raw
+    GET http://127.0.0.1:8099/admin/api/orders.json (up to 3 attempts; a
+    retry verifies itself)
+  TRACE 22:23:11.698 dag_healer.extract.fetch_raw
+    upstream returned 120 records
+  TRACE 22:23:11.698 dag_healer.pipeline.run_ingest
+    projected 120 records onto the canonical field names
+  TRACE 22:23:11.698 dag_healer.pipeline.run_ingest
+    checking the mapped records against the contract
+  TRACE 22:23:11.699 dag_healer.pipeline.run_ingest
+    contract satisfied; loading
+  TRACE 22:23:11.699 dag_healer.pipeline.load_to_warehouse
+    SQL BEGIN /Users/cesarzea/Documents/dag-healer/data/warehouse.sqlite:
+    full refresh of orders with 120 rows
+  TRACE 22:23:11.699 dag_healer.pipeline.load_to_warehouse
+    SQL COMMIT /Users/cesarzea/Documents/dag-healer/data/warehouse.sqlite:
+    120 rows loaded into orders
+  TRACE 22:23:11.699 dag_healer.pipeline.run_ingest
+    profiling 7 columns to record what a good run looks like
+  TRACE 22:23:11.700 dag_healer.baseline.save_baseline
+    WRITE /Users/cesarzea/Documents/dag-
+    healer/baselines/orders.baseline.json: saved profiles for order_id,
+    created_at, currency, total_amount, customer_id, line_items, status
+  TRACE 22:23:11.700 dag_healer.demo.execute
+    END run_ingest: recovery import -> completed in 15.0 ms
+  TRACE 22:23:11.700 dag_healer.demo.warehouse_snapshot
+    SQL READ /Users/cesarzea/Documents/dag-healer/data/warehouse.sqlite ->
+    orders=120, SUM(total_amount)=27895.24
+  ------------------------------------------------------------------------
+
+  RESULT: RECOVERED
+    120 orders loaded using mapping version 2.
+
+  Mean amount:
+    232.46, compared with 232.46 in the healthy run.
+
+  Human review:
+    1 applied change(s) recorded as awaiting review.
+
+  Pending review means an engineer can inspect what was changed and why.
+  This demo records that obligation; it does not pause data loading until
+  approval or provide an approval screen.
+
+  If an incorrect mapping passes the checks, auto_then_review permits wrong
+  values to enter the warehouse before a person reviews them. The subsequent
+  profile refresh can also make those values the next baseline. Review
+  afterwards does not prevent this exposure or implement rollback.
+
+  ========================================================================
+  PHASE 7/8 | A plausible answer can still be wrong
+  ========================================================================
+
+  Who acts:
+    The demo supplies a deliberately wrong diagnosis; Python checks it.
+
+  The API also contains 'shipping_price', the delivery charge. It is
+  numeric, non-null and within the amount's allowed range. Using it as the
+  order amount could pass all those data rules while making revenue reports
+  wrong.
+
+  A successful DAG state tells us that its tasks completed. To trust the
+  resulting revenue report, we also need evidence that the amount field
+  still represents order totals.
+
+  We now test that exact mistake. This answer is written into the demo, not
+  produced by AI. It includes a deliberately false equivalent-content claim
+  so the content gate passes and we can test whether the numeric evidence
+  catches the error. We use a copy of the original incident, so the real
+  repair record is preserved.
+
+  Failure class:
+    schema_drift_renamed_field
+
+  Meaning:
+    An API field appears to have been renamed.
+
+  Explanation:
+    The order amount appears to have moved to shipping_price.
+
+  Ownership:
+    customer: the diagnosis's suggested responsible party, not a verified
+    assignment.
+
+  Action:
+    remap_field: change where one existing reporting field reads its value.
+
+  Proposed rule:
+    Read reporting field 'total_amount' from API field 'shipping_price'.
+
+  Reason:
+    It is a number, within the permitted range, and never empty.
+
+  Confidence:
+    95%, reported by the diagnosis source. It is a claim, not a test result.
+
+  Content verdict:
+    equivalent: an assessment supplied by the diagnosis source, not an
+    independent semantic test.
+
+  Previous content:
+    Numeric order totals in the historical examples.
+
+  Current content:
+    Numeric delivery charges in the current examples.
+
+  Content reason:
+    Deliberately false equivalence claim supplied to test whether the
+    remaining evidence checks reject the proposal.
+
+  Running the same repair checks against that alternative. Watch the two
+  evidence results: satisfying the contract is only the first one.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.701 dag_healer.incident.save
+    WRITE /Users/cesarzea/Documents/dag-healer/incidents/safety-check.json:
+    incident=safety-check, violations=2, samples=3
+  TRACE 22:23:11.701 dag_healer.demo.execute
+    START heal: deliberately wrong shipping_price proposal
+  TRACE 22:23:11.701 dag_healer.healer.heal
+    incident safety-check loaded
+  TRACE 22:23:11.702 dag_healer.healer.heal
+    asking backend 'scripted-wrong-answer' for a diagnosis; its answer is a
+    hypothesis, not an instruction
+  TRACE 22:23:11.702 dag_healer.demo.diagnose
+    REUSE captured diagnosis for safety-check:
+    cause=schema_drift_renamed_field, action=remap_field; no new model call
+  TRACE 22:23:11.702 dag_healer.healer.heal
+    diagnosis received; mapping proposals must pass five gates
+  TRACE 22:23:11.702 dag_healer.healer.heal
+    gate 1 of 5, policy: is this class of failure one we agreed to automate?
+  TRACE 22:23:11.702 dag_healer.healer.heal
+    gate 2 of 5, allowlist: is the proposed action one of the few we can
+    perform?
+  TRACE 22:23:11.702 dag_healer.healer.heal
+    gate 3 of 5, structure: does the action make sense against the mapping
+    and the payload?
+  TRACE 22:23:11.702 dag_healer.healer.heal
+    gate 4 of 5, content: does this remap have a complete assessment and
+    actual content examples?
+  TRACE 22:23:11.702 dag_healer.healer._content_checks
+    CONTENT CHECK PASS | complete equivalent-content assessment matches the
+    proposed fields and has old and new examples; its semantic truth is not
+    independently verified
+  TRACE 22:23:11.702 dag_healer.healer.heal
+    gate 5 of 5, evidence: running the whole pipeline with the candidate
+    mapping to try to disprove it
+  TRACE 22:23:11.702 dag_healer.pipeline.dry_run
+    dry run: fetching and mapping with the candidate, loading nothing
+  TRACE 22:23:11.703 dag_healer.extract.fetch_raw
+    GET http://127.0.0.1:8099/admin/api/orders.json (up to 3 attempts; a
+    retry verifies itself)
+  TRACE 22:23:11.714 dag_healer.extract.fetch_raw
+    upstream returned 120 records
+  TRACE 22:23:11.715 dag_healer.healer._evidence_checks
+    comparing 'total_amount' against the last known-good profile: this is
+    what catches a repair that passes the contract and is still wrong
+  TRACE 22:23:11.715 dag_healer.healer._escalate
+    not repairing; writing an escalation with the evidence already gathered
+  TRACE 22:23:11.715 dag_healer.escalation.write_report
+    escalation written with 9 gate result(s) a human can read
+  TRACE 22:23:11.715 dag_healer.queue.record
+    recording the outcome and every gate result beside the incident
+  TRACE 22:23:11.716 dag_healer.queue.record
+    WRITE /Users/cesarzea/Documents/dag-healer/incidents/safety-
+    check.resolution.json: outcome=escalated, checks=9
+  TRACE 22:23:11.716 dag_healer.demo.execute
+    END heal: deliberately wrong shipping_price proposal -> completed in
+    14.7 ms
+  ------------------------------------------------------------------------
+
+  1. policy | May this kind of failure be repaired automatically?
+
+  PASS:
+    policy.yml assigns schema_drift_renamed_field to 'auto_then_review':
+    verify the repair, apply it, then record the change for human review.
+
+  PASS:
+    The proposal reports 95% confidence; the required minimum is 60%.
+    Confidence only permits evaluation to continue.
+
+  2. allowlist | Is this action in the list of permitted operations?
+
+  PASS:
+    remap_field is allowed. The permitted actions are: remap_field (repoint
+    one existing reporting field); retry (try the import again); escalate
+    (refer the problem to a person).
+
+  3. structure | Do the field names support the proposed mapping?
+
+  PASS:
+    'total_amount' already exists in our reporting format.
+
+  PASS:
+    The shop did send a field called 'shipping_price'.
+
+  PASS:
+    'shipping_price' is free to use: no other reporting field reads from it.
+
+  4. content | Is the assessment complete and supported by available
+  samples?
+
+  PASS:
+    complete equivalent-content assessment matches the proposed fields and
+    has old and new examples; its semantic truth is not independently
+    verified
+
+  5. evidence | Does a trial import pass BOTH data checks?
+
+  PASS:
+    a run with the candidate mapping passes the required-field, type and
+    value rules (120 rows, 0 broken rules)
+
+  STOP:
+    'total_amount' mean order amount moved from 232.46 to 6.94 (97% away,
+    tolerance 25%)
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.716 dag_healer.demo.warehouse_snapshot
+    SQL READ /Users/cesarzea/Documents/dag-healer/data/warehouse.sqlite ->
+    orders=120, SUM(total_amount)=27895.24
+  ------------------------------------------------------------------------
+
+  RESULT: REJECTED
+    escalated: automatic repair was refused and an explanation was saved for
+    a person.
+
+  The required-field, type and range checks passed. The mean amount was too
+  far from the healthy reference, so the historical comparison stopped the
+  change.
+
+  Mapping and data:
+    The repair from phase 5 and the loaded orders from phase 6 are
+    unchanged.
+
+  Escalation report:
+    A local Markdown file records the rejected proposal, passed checks and
+    reason for refusal. No message is sent to anyone.
+
+  Inside the refusal:
+    _escalate writes the Markdown report and a .resolution.json record. The
+    demo then reads the mapping and database again to verify that rejecting
+    this proposal left them unchanged.
+
+  ========================================================================
+  PHASE 8/8 | A semantic mistake can pass every check
+  ========================================================================
+
+  Who acts:
+    The demo supplies two controlled diagnoses; the real healer and import
+    run on an isolated copy.
+
+  The next API change replaces the total with subtotal, defined by this
+  fixture as 90% of the original amount. The name and the quantity change.
+  Its mean remains close enough to pass the default tolerance.
+
+  We copy the recovered mapping, contract, policy, baseline and warehouse
+  into a separate experiment directory. Both diagnoses below are supplied
+  test answers, even when phase 4 used Claude Code. They also falsely claim
+  equivalent content, simulating an incorrect semantic assessment. This
+  comparison tests policy enforcement and its limits; it does not
+  demonstrate that a model will classify this case correctly.
+
+  Two separate recorded live checks of this incident returned
+  semantic_change and escalate. The earlier check suggested subtotal +
+  shipping_price as a reconstruction, which this fixture does not support:
+  subtotal is 90% of the original total and shipping is generated
+  independently.
+
+  A repeat with Opus 5.5 and maximum effort explicitly noticed that this sum
+  still falls short and that historical and current samples are unpaired. It
+  still inferred that shipping was excluded and speculated about tax or
+  other charges, which the fixture does not establish. The healer refused
+  the change and preserved the copied mapping, baseline and warehouse. These
+  are two observations, not an accuracy guarantee or a controlled model
+  comparison. This phase uses supplied answers so the checks remain
+  reproducible.
+
+  Recorded live checks:
+    docs/observations/subtotal-claude-code.json and
+    docs/observations/subtotal-opus-5-5-max.json preserve the evidence and
+    original responses, including their limitations.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.717 dag_healer.demo.execute
+    START copy experiment input: orders.mapping.yml
+  TRACE 22:23:11.717 dag_healer.demo.execute
+    END copy experiment input: orders.mapping.yml -> completed in 0.3 ms
+  TRACE 22:23:11.718 dag_healer.demo.execute
+    START copy experiment input: orders.contract.yml
+  TRACE 22:23:11.718 dag_healer.demo.execute
+    END copy experiment input: orders.contract.yml -> completed in 0.2 ms
+  TRACE 22:23:11.718 dag_healer.demo.execute
+    START copy experiment input: policy.yml
+  TRACE 22:23:11.718 dag_healer.demo.execute
+    END copy experiment input: policy.yml -> completed in 0.3 ms
+  TRACE 22:23:11.718 dag_healer.demo.execute
+    START copy experiment input: orders.baseline.json
+  TRACE 22:23:11.718 dag_healer.demo.execute
+    END copy experiment input: orders.baseline.json -> completed in 0.2 ms
+  TRACE 22:23:11.718 dag_healer.demo.execute
+    START copy experiment input: warehouse.sqlite
+  TRACE 22:23:11.719 dag_healer.demo.execute
+    END copy experiment input: warehouse.sqlite -> completed in 0.2 ms
+  ------------------------------------------------------------------------
+
+  Experiment files:
+    data/semantic-check-m9h8pe4q
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.719 dag_healer.demo.execute
+    START GET /admin/state: remember source settings
+  TRACE 22:23:11.729 dag_healer.demo.execute
+    END GET /admin/state: remember source settings -> completed in 10.4 ms
+  TRACE 22:23:11.729 dag_healer.demo.execute
+    START POST /admin/state: rename_to_subtotal=true
+  TRACE 22:23:11.740 dag_healer.demo.execute
+    END POST /admin/state: rename_to_subtotal=true -> completed in 10.6 ms
+  ------------------------------------------------------------------------
+
+  Fault injection:
+    The fake API now emits subtotal = round(original total * 0.90, 2). The
+    copied mapping still requests order_total.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.740 dag_healer.demo.execute
+    START run_ingest: subtotal breaks the copied mapping
+  TRACE 22:23:11.741 dag_healer.pipeline.run_ingest
+    contract loaded: 7 canonical fields downstream depends on
+  TRACE 22:23:11.742 dag_healer.pipeline.run_ingest
+    mapping v2 loaded: this is where upstream change is absorbed
+  TRACE 22:23:11.742 dag_healer.extract.fetch_raw
+    GET http://127.0.0.1:8099/admin/api/orders.json (up to 3 attempts; a
+    retry verifies itself)
+  TRACE 22:23:11.753 dag_healer.extract.fetch_raw
+    upstream returned 120 records
+  TRACE 22:23:11.753 dag_healer.pipeline.run_ingest
+    projected 120 records onto the canonical field names
+  TRACE 22:23:11.753 dag_healer.pipeline.run_ingest
+    checking the mapped records against the contract
+  TRACE 22:23:11.754 dag_healer.pipeline.run_ingest
+    2 violation(s); nothing will be loaded
+  TRACE 22:23:11.754 dag_healer.pipeline.run_ingest
+    gathering evidence now, while it still exists: contract, mapping,
+    violations, upstream fields, redacted samples, last known-good profile
+  TRACE 22:23:11.754 dag_healer.incident.save
+    WRITE /Users/cesarzea/Documents/dag-healer/data/semantic-
+    check-m9h8pe4q/incidents/inc_20260922T212311_6d79ed.json:
+    incident=inc_20260922T212311_6d79ed, violations=2, samples=3
+  TRACE 22:23:11.754 dag_healer.demo.execute
+    END run_ingest: subtotal breaks the copied mapping ->
+    ContractViolationWithIncident after 14.3 ms
+  TRACE 22:23:11.755 dag_healer.demo.warehouse_snapshot
+    SQL READ /Users/cesarzea/Documents/dag-healer/data/semantic-
+    check-m9h8pe4q/data/warehouse.sqlite -> orders=120,
+    SUM(total_amount)=27895.24
+  ------------------------------------------------------------------------
+
+  Captured evidence:
+    3 samples; received fields: created_at, currency, customer_id,
+    financial_status, id, line_items_count, shipping_price, subtotal.
+
+  Case A: classify the incident as semantic_change. We deliberately keep the
+  wrong remap in the answer to show that policy overrides it. Confidence and
+  proposed action will be identical in case B.
+
+  Failure class:
+    semantic_change
+
+  Meaning:
+    The meaning of the data appears to have changed.
+
+  Explanation:
+    Controlled classification comparison for the subtotal replacement.
+
+  Ownership:
+    provider: the diagnosis's suggested responsible party, not a verified
+    assignment.
+
+  Action:
+    remap_field: change where one existing reporting field reads its value.
+
+  Proposed rule:
+    Read reporting field 'total_amount' from API field 'subtotal'.
+
+  Reason:
+    A deliberately incorrect remap supplied to test the policy and evidence
+    gates.
+
+  Confidence:
+    95%, reported by the diagnosis source. It is a claim, not a test result.
+
+  Content verdict:
+    equivalent: an assessment supplied by the diagnosis source, not an
+    independent semantic test.
+
+  Previous content:
+    Numeric order totals from the previous successful import.
+
+  Current content:
+    Numeric subtotal values in the current response.
+
+  Content reason:
+    Deliberately false assessment: treat these two monetary quantities as
+    equivalent to test the remaining checks.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.755 dag_healer.demo.execute
+    START heal: semantic_change classification
+  TRACE 22:23:11.755 dag_healer.healer.heal
+    incident inc_20260922T212311_6d79ed loaded
+  TRACE 22:23:11.756 dag_healer.healer.heal
+    asking backend 'controlled-semantic-diagnosis' for a diagnosis; its
+    answer is a hypothesis, not an instruction
+  TRACE 22:23:11.756 dag_healer.demo.diagnose
+    REUSE captured diagnosis for inc_20260922T212311_6d79ed:
+    cause=semantic_change, action=remap_field; no new model call
+  TRACE 22:23:11.756 dag_healer.healer.heal
+    diagnosis received; mapping proposals must pass five gates
+  TRACE 22:23:11.756 dag_healer.healer.heal
+    gate 1 of 5, policy: is this class of failure one we agreed to automate?
+  TRACE 22:23:11.756 dag_healer.healer.heal
+    gate 2 of 5, allowlist: is the proposed action one of the few we can
+    perform?
+  TRACE 22:23:11.756 dag_healer.healer._escalate
+    not repairing; writing an escalation with the evidence already gathered
+  TRACE 22:23:11.756 dag_healer.escalation.write_report
+    escalation written with 3 gate result(s) a human can read
+  TRACE 22:23:11.756 dag_healer.queue.record
+    recording the outcome and every gate result beside the incident
+  TRACE 22:23:11.756 dag_healer.queue.record
+    WRITE /Users/cesarzea/Documents/dag-healer/data/semantic-
+    check-m9h8pe4q/incidents/inc_20260922T212311_6d79ed.resolution.json:
+    outcome=escalated, checks=3
+  TRACE 22:23:11.756 dag_healer.demo.execute
+    END heal: semantic_change classification -> completed in 1.4 ms
+  ------------------------------------------------------------------------
+
+  1. policy | May this kind of failure be repaired automatically?
+
+  STOP:
+    policy.yml assigns semantic_change to 'escalate': a person must handle
+    this failure. Automatic repair is forbidden.
+
+  PASS:
+    The proposal reports 95% confidence; the required minimum is 60%.
+    Confidence only permits evaluation to continue.
+
+  2. allowlist | Is this action in the list of permitted operations?
+
+  PASS:
+    remap_field is allowed. The permitted actions are: remap_field (repoint
+    one existing reporting field); retry (try the import again); escalate
+    (refer the problem to a person).
+
+  3. structure | Do the field names support the proposed mapping?
+
+  NOT RUN:
+    An earlier decision ended verification.
+
+  4. content | Is the assessment complete and supported by available
+  samples?
+
+  NOT RUN:
+    An earlier decision ended verification.
+
+  5. evidence | Does a trial import pass BOTH data checks?
+
+  NOT RUN:
+    An earlier decision ended verification.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.757 dag_healer.demo.warehouse_snapshot
+    SQL READ /Users/cesarzea/Documents/dag-healer/data/semantic-
+    check-m9h8pe4q/data/warehouse.sqlite -> orders=120,
+    SUM(total_amount)=27895.24
+  ------------------------------------------------------------------------
+
+  RESULT: ESCALATED
+    Policy blocked the remap because the supplied cause_class was
+    semantic_change. The copied mapping and warehouse are unchanged.
+
+  Case B: use the same evidence, confidence and proposed remap, but change
+  cause_class to schema_drift_renamed_field. This deliberately simulates a
+  classification error. No model is called.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.757 dag_healer.incident.save
+    WRITE /Users/cesarzea/Documents/dag-healer/data/semantic-
+    check-m9h8pe4q/incidents/semantic-misclassified.json: incident=semantic-
+    misclassified, violations=2, samples=3
+  ------------------------------------------------------------------------
+
+  Failure class:
+    schema_drift_renamed_field
+
+  Meaning:
+    An API field appears to have been renamed.
+
+  Explanation:
+    Controlled classification comparison for the subtotal replacement.
+
+  Ownership:
+    provider: the diagnosis's suggested responsible party, not a verified
+    assignment.
+
+  Action:
+    remap_field: change where one existing reporting field reads its value.
+
+  Proposed rule:
+    Read reporting field 'total_amount' from API field 'subtotal'.
+
+  Reason:
+    A deliberately incorrect remap supplied to test the policy and evidence
+    gates.
+
+  Confidence:
+    95%, reported by the diagnosis source. It is a claim, not a test result.
+
+  Content verdict:
+    equivalent: an assessment supplied by the diagnosis source, not an
+    independent semantic test.
+
+  Previous content:
+    Numeric order totals from the previous successful import.
+
+  Current content:
+    Numeric subtotal values in the current response.
+
+  Content reason:
+    Deliberately false assessment: treat these two monetary quantities as
+    equivalent to test the remaining checks.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.757 dag_healer.demo.execute
+    START heal: misclassified subtotal proposal
+  TRACE 22:23:11.758 dag_healer.healer.heal
+    incident semantic-misclassified loaded
+  TRACE 22:23:11.758 dag_healer.healer.heal
+    asking backend 'controlled-wrong-classification' for a diagnosis; its
+    answer is a hypothesis, not an instruction
+  TRACE 22:23:11.758 dag_healer.demo.diagnose
+    REUSE captured diagnosis for semantic-misclassified:
+    cause=schema_drift_renamed_field, action=remap_field; no new model call
+  TRACE 22:23:11.758 dag_healer.healer.heal
+    diagnosis received; mapping proposals must pass five gates
+  TRACE 22:23:11.758 dag_healer.healer.heal
+    gate 1 of 5, policy: is this class of failure one we agreed to automate?
+  TRACE 22:23:11.758 dag_healer.healer.heal
+    gate 2 of 5, allowlist: is the proposed action one of the few we can
+    perform?
+  TRACE 22:23:11.758 dag_healer.healer.heal
+    gate 3 of 5, structure: does the action make sense against the mapping
+    and the payload?
+  TRACE 22:23:11.758 dag_healer.healer.heal
+    gate 4 of 5, content: does this remap have a complete assessment and
+    actual content examples?
+  TRACE 22:23:11.758 dag_healer.healer._content_checks
+    CONTENT CHECK PASS | complete equivalent-content assessment matches the
+    proposed fields and has old and new examples; its semantic truth is not
+    independently verified
+  TRACE 22:23:11.759 dag_healer.healer.heal
+    gate 5 of 5, evidence: running the whole pipeline with the candidate
+    mapping to try to disprove it
+  TRACE 22:23:11.759 dag_healer.pipeline.dry_run
+    dry run: fetching and mapping with the candidate, loading nothing
+  TRACE 22:23:11.760 dag_healer.extract.fetch_raw
+    GET http://127.0.0.1:8099/admin/api/orders.json (up to 3 attempts; a
+    retry verifies itself)
+  TRACE 22:23:11.770 dag_healer.extract.fetch_raw
+    upstream returned 120 records
+  TRACE 22:23:11.771 dag_healer.healer._evidence_checks
+    comparing 'total_amount' against the last known-good profile: this is
+    what catches a repair that passes the contract and is still wrong
+  TRACE 22:23:11.771 dag_healer.healer.heal
+    every gate passed; writing mapping v3
+  TRACE 22:23:11.771 dag_healer.mapping.save
+    writing orders.mapping.yml at v3, keeping the header a human wrote
+  TRACE 22:23:11.772 dag_healer.queue.record
+    recording the outcome and every gate result beside the incident
+  TRACE 22:23:11.772 dag_healer.queue.record
+    WRITE /Users/cesarzea/Documents/dag-healer/data/semantic-
+    check-m9h8pe4q/incidents/semantic-misclassified.resolution.json:
+    outcome=repaired, checks=9
+  TRACE 22:23:11.772 dag_healer.demo.execute
+    END heal: misclassified subtotal proposal -> completed in 14.4 ms
+  ------------------------------------------------------------------------
+
+  1. policy | May this kind of failure be repaired automatically?
+
+  PASS:
+    policy.yml assigns schema_drift_renamed_field to 'auto_then_review':
+    verify the repair, apply it, then record the change for human review.
+
+  PASS:
+    The proposal reports 95% confidence; the required minimum is 60%.
+    Confidence only permits evaluation to continue.
+
+  2. allowlist | Is this action in the list of permitted operations?
+
+  PASS:
+    remap_field is allowed. The permitted actions are: remap_field (repoint
+    one existing reporting field); retry (try the import again); escalate
+    (refer the problem to a person).
+
+  3. structure | Do the field names support the proposed mapping?
+
+  PASS:
+    'total_amount' already exists in our reporting format.
+
+  PASS:
+    The shop did send a field called 'subtotal'.
+
+  PASS:
+    'subtotal' is free to use: no other reporting field reads from it.
+
+  4. content | Is the assessment complete and supported by available
+  samples?
+
+  PASS:
+    complete equivalent-content assessment matches the proposed fields and
+    has old and new examples; its semantic truth is not independently
+    verified
+
+  5. evidence | Does a trial import pass BOTH data checks?
+
+  PASS:
+    a run with the candidate mapping passes the required-field, type and
+    value rules (120 rows, 0 broken rules)
+
+  PASS:
+    'total_amount' mean order amount 232.46 -> 209.21 (10% away), missing-
+    value rate 0.00% -> 0.00%, inside a 25% tolerance
+
+  RESULT: FALSE ACCEPT
+    Every implemented check passed, and the wrong mapping was applied in the
+    experiment. This is a demonstrated limitation, not a successful repair.
+
+  This is a POC with deliberately limited verification rules. The wrong
+  result shows a gap in these rules; it does not set the level of validation
+  a real system should accept. Engineers can make the acceptance criteria as
+  strict as their use case requires, through configuration and additional
+  implementation.
+
+  Configurable today:
+    In policy.yml, setting mean_relative_delta to 0.05 (5%) would reject
+    this 10% difference. Setting schema_drift_renamed_field to escalate
+    would refuse automatic repair and leave the incident for a person.
+
+  Additional engineering:
+    Checks against business rules, authoritative field definitions or human
+    approval before applying a repair would require further implementation.
+    Tighter thresholds can also reject valid changes, and similar statistics
+    still do not establish equivalent meaning.
+
+  Run the import with that mapping now. The writes below go to the copied
+  SQLite warehouse, showing the downstream consequence of accepting this
+  proposal.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.773 dag_healer.demo.execute
+    START run_ingest: load incorrect subtotal amounts into the copy
+  TRACE 22:23:11.774 dag_healer.pipeline.run_ingest
+    contract loaded: 7 canonical fields downstream depends on
+  TRACE 22:23:11.775 dag_healer.pipeline.run_ingest
+    mapping v3 loaded: this is where upstream change is absorbed
+  TRACE 22:23:11.775 dag_healer.extract.fetch_raw
+    GET http://127.0.0.1:8099/admin/api/orders.json (up to 3 attempts; a
+    retry verifies itself)
+  TRACE 22:23:11.786 dag_healer.extract.fetch_raw
+    upstream returned 120 records
+  TRACE 22:23:11.786 dag_healer.pipeline.run_ingest
+    projected 120 records onto the canonical field names
+  TRACE 22:23:11.786 dag_healer.pipeline.run_ingest
+    checking the mapped records against the contract
+  TRACE 22:23:11.786 dag_healer.pipeline.run_ingest
+    contract satisfied; loading
+  TRACE 22:23:11.787 dag_healer.pipeline.load_to_warehouse
+    SQL BEGIN /Users/cesarzea/Documents/dag-healer/data/semantic-
+    check-m9h8pe4q/data/warehouse.sqlite: full refresh of orders with 120
+    rows
+  TRACE 22:23:11.787 dag_healer.pipeline.load_to_warehouse
+    SQL COMMIT /Users/cesarzea/Documents/dag-healer/data/semantic-
+    check-m9h8pe4q/data/warehouse.sqlite: 120 rows loaded into orders
+  TRACE 22:23:11.787 dag_healer.pipeline.run_ingest
+    profiling 7 columns to record what a good run looks like
+  TRACE 22:23:11.787 dag_healer.baseline.save_baseline
+    WRITE /Users/cesarzea/Documents/dag-healer/data/semantic-
+    check-m9h8pe4q/baselines/orders.baseline.json: saved profiles for
+    order_id, created_at, currency, total_amount, customer_id, line_items,
+    status
+  TRACE 22:23:11.787 dag_healer.demo.execute
+    END run_ingest: load incorrect subtotal amounts into the copy ->
+    completed in 14.3 ms
+  TRACE 22:23:11.788 dag_healer.demo.warehouse_snapshot
+    SQL READ /Users/cesarzea/Documents/dag-healer/data/semantic-
+    check-m9h8pe4q/data/warehouse.sqlite -> orders=120,
+    SUM(total_amount)=25105.70
+  ------------------------------------------------------------------------
+
+  Loaded evidence:
+    120 orders; mean 232.46 -> 209.21; total 27895.24 -> 25105.70 (10%
+    lower).
+
+  Review state:
+    review_required=True; mapping history records review=pending. The copied
+    warehouse already contains the wrong values.
+
+  Baseline effect:
+    The successful import also saved 209.21 as the next reference mean,
+    despite the semantic error.
+
+  The classification was the decisive difference. The policy rejects a
+  semantic_change label; it does not independently recognize every semantic
+  change. Similar numeric profiles cannot establish that two fields have the
+  same meaning.
+
+  Execution trace | live Python output
+  ------------------------------------------------------------------------
+  TRACE 22:23:11.788 dag_healer.demo.execute
+    START POST /admin/state: restore source settings after experiment
+  TRACE 22:23:11.798 dag_healer.demo.execute
+    END POST /admin/state: restore source settings after experiment ->
+    completed in 10.4 ms
+  TRACE 22:23:11.799 dag_healer.demo.warehouse_snapshot
+    SQL READ /Users/cesarzea/Documents/dag-healer/data/warehouse.sqlite ->
+    orders=120, SUM(total_amount)=27895.24
+  ------------------------------------------------------------------------
+
+  Main demo state:
+    The recovered mapping, baseline and warehouse are unchanged. The API's
+    original rename settings have been restored.
+
+  Evidence retained:
+    data/semantic-check-m9h8pe4q/ contains both resolutions, the wrong
+    mapping and the copied warehouse for inspection. It is separate from
+    Airflow's incident queue.
+
+  DEMO COMPLETE
+
+  The renamed field was repaired and the import recovered. The
+  shipping_price proposal was rejected by the baseline. In the isolated
+  subtotal experiment, semantic_change forced escalation; misclassifying the
+  same incident as a rename let an incorrect mapping pass every check and
+  load wrong amounts.
+
+  The LLM contributes diagnosis; deterministic checks constrain actions and
+  reject some wrong proposals. Neither the classification nor a passing
+  statistical comparison proves semantic equivalence. The controlled answers
+  in phases 7 and 8 test the checks, not the model's accuracy.
+
+  This POC demonstrates how AI can assist pipeline problem resolution
+  through one limited example. Its validation rules are demonstration rules,
+  not a finished production standard. Engineers would configure and extend
+  them to meet the application's data requirements and acceptable risk,
+  including refusing automatic repair where the evidence is insufficient.
+
+  The operational benefit to evaluate is fewer repeated investigations, with
+  evidence for every applied or refused repair. This run demonstrates one
+  orders pipeline and one repairable field rename. Measuring recovery time,
+  review effort and incorrect repairs across more pipelines would be the
+  next step.
+
+  Production work:
+    Durable incident delivery, concurrent-update protection, a review
+    interface, rolling baselines and failure-path hardening would be needed
+    beyond this local demonstration.
+
+  The local YAML mapping and file queue do not provide coordination across
+  distributed workers. Better statistical references can help with
+  variability, but establishing field meaning needs additional evidence,
+  such as provider definitions, business invariants or human review before
+  use.
+
+  Watch the DAGs:
+    Run docker compose up and open http://127.0.0.1:8080. The scheduler,
+    task dependencies and deferred sensor run in Airflow.
+
+  Files from this run, if you want to inspect the evidence:
+
+  Field rules:
+    contracts/orders.contract.yml
+
+  Automation rules:
+    policy.yml
+
+  Applied mapping:
+    mappings/orders.mapping.yml (includes the change history)
+
+  Reference data:
+    baselines/orders.baseline.json
+
+  Failure evidence:
+    incidents/inc_20260922T212134_360844.json
+
+  Repair checks:
+    incidents/inc_20260922T212134_360844.resolution.json
+
+  Rejected proposal:
+    incidents/safety-check.escalation.md
+
+  Accepted mistake:
+    data/semantic-check-m9h8pe4q/ (isolated mapping, incidents, warehouse
+    and refreshed baseline)
+
+  Design context:
+    docs/design-rationale.md (the orders example, Airflow architecture and
+    production boundaries)

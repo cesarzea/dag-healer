@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 # Put the repo back to its pristine state: mapping v1, no baseline, no incidents.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 cat > mappings/orders.mapping.yml <<'YAML'
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 # Upstream-to-canonical field mapping for `orders`.
 #
 # This is the only configuration file the repair may modify, and only

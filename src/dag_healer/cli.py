@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """Command line entry point, so the whole loop can be driven without Airflow."""
 
 from __future__ import annotations
@@ -351,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     heal_parser.add_argument(
         "--pending", action="store_true", help="drain every unresolved incident"
     )
-    heal_parser.add_argument("--backend", default="claude-code", choices=["claude-code", "mock"])
+    heal_parser.add_argument("--backend", default="claude-code", choices=["claude-code", "mock"], help=argparse.SUPPRESS)
     heal_parser.add_argument(
         "--diagnosis",
         metavar="JSON_OR_PATH",

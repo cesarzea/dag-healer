@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 """A guided demonstration of the real pipeline and its repair checks."""
 
 from __future__ import annotations
@@ -324,7 +328,7 @@ def run_demo(settings: Settings, backend: LLMBackend, out: Console) -> None:
 
     out.phase(1, "Run the orders_ingest task on healthy data", "The demo executes the function used by orders_ingest.validate_and_load.")
     out.fact("Import DAG", "orders_ingest: validate_and_load (@task) calls run_ingest to extract, map, validate and load orders.")
-    out.fact("Airflow settings", "Scheduled every 15 minutes; max_active_runs=1 prevents overlapping runs of this DAG. A failed task has one retry after one minute.")
+    out.fact("Airflow settings", "Scheduled every 15 minutes; max_active_runs=1 prevents overlapping runs of this DAG. A failed task has one retry after five minutes.")
     out.say("First we reset the local demo data and inspect the healthy API response. The next trace block shows this preparation: reset_demo restores the starting state, then fetch_raw reads the orders. We will run the import after explaining how those source fields map to the reporting data.")
     execute("reset_demo", reset_demo, settings)
     before = load_mapping(settings.mapping_path)
@@ -397,14 +401,14 @@ def run_demo(settings: Settings, backend: LLMBackend, out: Console) -> None:
     out.say("wait_for_an_incident uses IncidentSensor. When the queue is empty, it defers to Airflow's triggerer, whose asynchronous loop checks for unresolved files every five seconds. Waiting does not occupy a worker slot. drain_incident_queue then processes the evidence; the LLM is called for diagnosis, not to poll for failures.")
     out.say("The diagnosis receives the evidence saved in phase 3: what failed, which fields the shop sent and what the amounts looked like before. It is asked to explain the failure and propose at most one change.")
     out.say("Claude Code must compare historical content examples with the candidate's current values and the contract's description. Product descriptions should still describe products; a subtotal must not be mistaken for an order total just because both are numbers. Its answer includes a content_check verdict, two content summaries and a reason.")
-    out.say("In phase 5, the healer requires every remap to carry a complete equivalent-content assessment for the proposed fields, with available old and new examples. This content gate applies to Claude Code, the mock, supplied diagnoses and future backends. The backend only returns the answer; the healer records a PASS or STOP without rewriting what the diagnosis source said.")
-    out.say("This requirement blocks missing evidence and an assessment that admits uncertainty, but a confident, incorrect equivalent verdict can pass. Requiring the assessment is a rule for accepting a proposal, not independent proof of its meaning. The mock supplies a clearly labeled scripted claim; it does not perform semantic analysis.")
-    out.fact("Backend contract", "LLMBackend.diagnose returns a Diagnosis: cause_class, ownership, confidence and proposed_action. Both the Claude Code backend and the mock implement this interface.")
+    out.say("In phase 5, the healer requires every remap to carry a complete equivalent-content assessment for the proposed fields, with available old and new examples. This content gate applies to Claude Code, supplied diagnoses and future backends. The backend only returns the answer; the healer records a PASS or STOP without rewriting what the diagnosis source said.")
+    out.say("This requirement blocks missing evidence and an assessment that admits uncertainty, but a confident, incorrect equivalent verdict can pass. Requiring the assessment is a rule for accepting a proposal, not independent proof of its meaning.")
+    out.fact("Backend contract", "LLMBackend.diagnose returns a Diagnosis: cause_class, ownership, confidence and proposed_action. The Claude Code backend implements this interface.")
     if backend.name == "claude-code":
         out.say(f'ClaudeCodeBackend starts a subprocess: claude -p <evidence prompt> --model {backend.model} --effort {backend.effort} --output-format json --restricted --tools "" --strict-mcp-config. The model and reasoning effort are selected explicitly. The CLI is configured without tools; its JSON answer is parsed into a Diagnosis. These CLI restrictions are not an operating-system sandbox.')
         out.say("Calling Claude Code now to classify the failure, compare the content examples and propose an action. The demo waits for the CLI's complete JSON answer, so no partial answer is displayed. A WAITING message appears every five seconds with elapsed time and the timeout; it reports the wait, not how much of the model's work is complete. No input is needed. Press Ctrl+C to cancel.")
     else:
-        out.say("The stand-in chooses the first unused API field in alphabetical order. It is deliberately simple: the independent checks must judge its answer. Run without 'mock' to use Claude Code instead.")
+        out.say("The stand-in chooses the first unused API field in alphabetical order. It is deliberately simple: the independent checks must judge its answer.")
     diagnosis = execute(f"{backend.name}.diagnose: {incident.incident_id}", backend.diagnose, incident)
     out.say()
     show_proposal(out, diagnosis)
@@ -466,7 +470,7 @@ def run_demo(settings: Settings, backend: LLMBackend, out: Console) -> None:
     out.say("The operational benefit to evaluate is fewer repeated investigations, with evidence for every applied or refused repair. This run demonstrates one orders pipeline and one repairable field rename. Measuring recovery time, review effort and incorrect repairs across more pipelines would be the next step.")
     out.fact("Production work", "Durable incident delivery, concurrent-update protection, a review interface, rolling baselines and failure-path hardening would be needed beyond this local demonstration.")
     out.say("The local YAML mapping and file queue do not provide coordination across distributed workers. Better statistical references can help with variability, but establishing field meaning needs additional evidence, such as provider definitions, business invariants or human review before use.")
-    out.fact("Watch the DAGs", "Run docker compose up and open http://127.0.0.1:8080. The container uses the mock diagnosis backend; the scheduler, task dependencies and deferred sensor run in Airflow.")
+    out.fact("Watch the DAGs", "Run docker compose up and open http://127.0.0.1:8080. The scheduler, task dependencies and deferred sensor run in Airflow.")
     out.say()
     out.say("Files from this run, if you want to inspect the evidence:")
     out.fact("Field rules", "contracts/orders.contract.yml")
@@ -659,7 +663,7 @@ def _semantic_blind_spot(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="./scripts/demo.sh", description="Walk through a pipeline repair and its verification limits, pressing Return after each phase.")
-    parser.add_argument("backend", nargs="?", choices=("claude-code", "mock"), default="claude-code", help="Use Claude Code for a live diagnosis, or mock for a scripted answer with the same real checks.")
+    parser.add_argument("backend", nargs="?", choices=("claude-code", "mock"), default="claude-code", help=argparse.SUPPRESS)
     parser.add_argument("--no-pause", action="store_true", default=bool(os.environ.get("NO_PAUSE")), help="Run unattended without waiting for Return.")
     parser.add_argument("--start-services", action="store_true", help="Authorize starting Docker and the local API if needed, without startup questions. Phase pauses still apply unless --no-pause is used.")
     debug = parser.add_mutually_exclusive_group()
@@ -677,7 +681,7 @@ def main(argv: list[str] | None = None) -> int:
 def _run(settings: Settings, backend: LLMBackend, out: Console, *, debug: bool, start_services: bool = False) -> int:
     try:
         if isinstance(backend, ClaudeCodeBackend) and not backend.available():
-            raise DemoError("Claude Code was not found. Install and sign in to Claude Code, or run './scripts/demo.sh mock' to use the scripted diagnosis.")
+            raise DemoError("Claude Code was not found. Install and sign in to Claude Code, then run the demo again.")
         ensure_services(settings, out, start_services=start_services, no_pause=out.no_pause)
         run_demo(settings, backend, out)
     except KeyboardInterrupt:

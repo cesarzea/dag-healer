@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 # Interactive walkthrough. Use --no-pause for an unattended recording.
 set -euo pipefail
 cd "$(dirname "$0")/.."

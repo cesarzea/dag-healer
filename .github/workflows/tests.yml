@@ -1,3 +1,7 @@
+# DAG-Healer (https://github.com/cesarzea/dag-healer)
+# Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+# SPDX-License-Identifier: MIT
+
 name: tests
 
 on:
@@ -41,4 +45,13 @@ jobs:
           PYTHONPATH: src:.
           AIRFLOW_HOME: ${{ github.workspace }}/.airflow
           AIRFLOW__CORE__LOAD_EXAMPLES: "False"
-        run: pytest -q
+        run: pytest -q --cov=src/dag_healer --cov=dags --cov-report=term --cov-report=xml
+
+      # One upload feeds the badge. The token is a repository secret; without
+      # it the upload fails and the tests still count.
+      - name: Upload coverage
+        if: matrix.airflow == '3.3.2'
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml

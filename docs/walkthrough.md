@@ -1,3 +1,9 @@
+<!--
+DAG-Healer (https://github.com/cesarzea/dag-healer)
+Copyright (c) 2026 César Pedro Zea Gómez (https://www.cesarzea.com)
+SPDX-License-Identifier: MIT
+-->
+
 # Walkthrough
 
 `./scripts/demo.sh` runs the main loop and narrates itself. This is for poking
@@ -116,7 +122,7 @@ in the morning does not have to reconstruct any of that.
 ./scripts/inject_failure.sh rename
 .venv/bin/python -m dag_healer.cli ingest
 rm baselines/orders.baseline.json
-.venv/bin/python -m dag_healer.cli heal --latest --backend mock
+.venv/bin/python -m dag_healer.cli heal --latest   # asks Claude Code; a minute or two
 ```
 
 ```
