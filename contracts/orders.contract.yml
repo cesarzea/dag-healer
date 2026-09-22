@@ -1,7 +1,7 @@
 # Data contract for the canonical `orders` entity.
 #
-# This file is the source of truth for what downstream consumers (the
-# personalisation engine, the reporting layer) are allowed to assume.
+# This file is the source of truth for what downstream consumers, such as
+# analytics jobs and revenue reports, are allowed to assume.
 # It is deliberately independent of whatever shape the upstream API happens
 # to have today: the mapping layer is what absorbs upstream change.
 #
@@ -23,6 +23,8 @@ fields:
     pattern: "^[A-Z]{3}$"
   - name: total_amount
     type: number
+    description: Order total used for revenue reporting, not a subtotal or delivery charge.
+    sample_for_diagnosis: true
     required: true
     min: 0
     max: 1000000

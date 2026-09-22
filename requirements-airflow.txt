@@ -1,4 +1,14 @@
-# Install with the matching constraints file, as Airflow requires:
+# Airflow is installed separately from the reliability layer, because it pins a
+# large constraint set that has no business constraining this code.
+#
+# The DAGs run on both Airflow 2.11 and Airflow 3.x: the imports that moved
+# between them are guarded, and CI runs the suite against both. Pick the one
+# that matches your Python.
+#
+#   Python 3.13    ->  apache-airflow==3.3.2
+#   Python 3.11/3.12 -> either
+#
+# Always install with the matching constraints file:
 #   pip install -r requirements-airflow.txt \
-#     --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.11.0/constraints-3.11.txt
-apache-airflow==2.11.0
+#     --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.13.txt
+apache-airflow==3.3.2

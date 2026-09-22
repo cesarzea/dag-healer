@@ -9,11 +9,38 @@ repaired and verified mechanically.
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+log = logging.getLogger(__name__)
+
+_DEFAULT_HEADER = (
+    "# Upstream-to-canonical field mapping.\n"
+    "# Managed jointly by engineers and the reliability layer; every\n"
+    "# automated change is recorded under `history` as pending review.\n"
+)
+
+
+def _leading_comment(text: str) -> str | None:
+    """The comment block at the top of a mapping file, if it has one.
+
+    Carried across automated edits, because the header is where the layer's
+    limits are written down for whoever opens the file next. A layer whose
+    whole argument is restraint should not overwrite the paragraph describing
+    what it is not allowed to do.
+    """
+    kept: list[str] = []
+    for line in text.splitlines():
+        if not line.startswith("#") and line.strip():
+            break
+        kept.append(line)
+    while kept and not kept[-1].strip():
+        kept.pop()
+    return "\n".join(kept) + "\n" if kept else None
 
 
 @dataclass
@@ -26,6 +53,7 @@ class Mapping:
     fields: dict[str, str]
     history: list[dict[str, Any]] = field(default_factory=list)
     path: Path | None = None
+    header: str | None = None
 
     def source_for(self, canonical: str) -> str | None:
         return self.fields.get(canonical)
@@ -90,6 +118,7 @@ class Mapping:
             fields=new_fields,
             history=[*self.history, entry],
             path=self.path,
+            header=self.header,
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -107,11 +136,12 @@ class Mapping:
         target = Path(path or self.path or "")
         if not str(target):
             raise ValueError("no path to save mapping to")
-        header = (
-            "# Upstream-to-canonical field mapping.\n"
-            "# Managed jointly by engineers and the reliability layer; every\n"
-            "# automated change is recorded under `history` as pending review.\n"
+        log.debug(
+            "writing %s at v%d, keeping the header a human wrote",
+            target.name,
+            self.version,
         )
+        header = self.header or _DEFAULT_HEADER
         target.write_text(
             header + yaml.safe_dump(self.as_dict(), sort_keys=False, allow_unicode=True),
             encoding="utf-8",
@@ -121,7 +151,8 @@ class Mapping:
 
 def load_mapping(path: str | Path) -> Mapping:
     p = Path(path)
-    raw = yaml.safe_load(p.read_text(encoding="utf-8"))
+    text = p.read_text(encoding="utf-8")
+    raw = yaml.safe_load(text)
     return Mapping(
         entity=raw["entity"],
         version=int(raw["version"]),
@@ -131,4 +162,5 @@ def load_mapping(path: str | Path) -> Mapping:
         fields=dict(raw["fields"]),
         history=list(raw.get("history") or []),
         path=p,
+        header=_leading_comment(text),
     )

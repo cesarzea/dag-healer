@@ -34,9 +34,20 @@ def _free_port() -> int:
 
 @pytest.fixture()
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A throwaway copy of the repo's declarative files."""
-    for name in ("contracts", "mappings"):
-        shutil.copytree(ROOT / name, tmp_path / name)
+    """A throwaway copy of the repo's declarative files.
+
+    The mapping comes from a fixture rather than from the working tree,
+    because it is the one file the layer rewrites when it runs. Copying the
+    live one made the suite depend on whether anyone had run the demo since
+    the last reset, which is a bad property for the tests that are supposed
+    to say what the layer will and will not do.
+    """
+    shutil.copytree(ROOT / "contracts", tmp_path / "contracts")
+    (tmp_path / "mappings").mkdir()
+    shutil.copy(
+        Path(__file__).parent / "fixtures" / "orders.mapping.yml",
+        tmp_path / "mappings" / "orders.mapping.yml",
+    )
     shutil.copy(ROOT / "policy.yml", tmp_path / "policy.yml")
     (tmp_path / "baselines").mkdir()
     (tmp_path / "incidents").mkdir()

@@ -1,8 +1,9 @@
 # Operating policy: how much autonomy the reliability layer has, per failure
 # class. Mirrors the autonomy levels in docs/autonomy-levels.md.
 #
-# `auto`             act without asking, then record the change as pending review
-# `auto_then_review` act, but hold the pipeline until a human acknowledges
+# `auto`             handle automatically without requiring human review
+# `auto_then_review` apply a verified repair and record it for later review;
+#                   the pipeline may resume before a human acknowledges it
 # `escalate`         never act, always hand to a human with the evidence
 levels:
   transient_source_error: auto

@@ -1,0 +1,332 @@
+{
+  "observed_at": "2026-09-22T18:41:06.151039+00:00",
+  "method": "One live diagnosis with the same phase 8 incident as the earlier observation, evaluated by the current healer on an isolated copy and API fixture.",
+  "scope": "One observation, not an accuracy benchmark or guarantee. The evidence is unchanged; the CLI version, model selection and healer have changed.",
+  "requested_model": "claude-opus-5-5",
+  "requested_effort": "max",
+  "cli_version": "2.1.280 (Claude Code)",
+  "prompt_sha256": "66fd6439bca9f6431b8b0b8716bc320aac5f851e1554f2aded0257e3f8d5cf68",
+  "elapsed_seconds": 131.64,
+  "fixture": {
+    "seed": 20260922,
+    "order_count": 120,
+    "subtotal_rule": "round(original_total * 0.90, 2)",
+    "shipping_rule": "Generated independently; not defined as the difference between original_total and subtotal"
+  },
+  "formula_check": [
+    {
+      "original_total": 381.46,
+      "subtotal": 343.31,
+      "shipping_price": 8.07,
+      "subtotal_plus_shipping": 351.38
+    },
+    {
+      "original_total": 223.66,
+      "subtotal": 201.29,
+      "shipping_price": 6.63,
+      "subtotal_plus_shipping": 207.92
+    },
+    {
+      "original_total": 294.19,
+      "subtotal": 264.77,
+      "shipping_price": 5.5,
+      "subtotal_plus_shipping": 270.27
+    }
+  ],
+  "evidence": {
+    "incident_id": "inc_20260922T180049_997dee",
+    "created_at": "2026-09-22T18:00:49+00:00",
+    "entity": "orders",
+    "dag_id": "orders_ingest",
+    "task_id": "validate_and_load",
+    "error_type": "ContractViolation",
+    "error_message": "2 contract violation(s) on 'orders':\n  - missing_source_field [total_amount]: upstream no longer returns 'order_total', which is the source for canonical field 'total_amount'\n  - null_in_required_field [total_amount]: 120 record(s): null in a required field",
+    "contract_fields": [
+      {
+        "name": "order_id",
+        "type": "string",
+        "required": true,
+        "description": null,
+        "sample_for_diagnosis": false
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "required": true,
+        "description": null,
+        "sample_for_diagnosis": false
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "required": true,
+        "description": null,
+        "sample_for_diagnosis": false
+      },
+      {
+        "name": "total_amount",
+        "type": "number",
+        "required": true,
+        "description": "Order total used for revenue reporting, not a subtotal or delivery charge.",
+        "sample_for_diagnosis": true
+      },
+      {
+        "name": "customer_id",
+        "type": "string",
+        "required": false,
+        "description": null,
+        "sample_for_diagnosis": false
+      },
+      {
+        "name": "line_items",
+        "type": "integer",
+        "required": true,
+        "description": null,
+        "sample_for_diagnosis": false
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "required": true,
+        "description": null,
+        "sample_for_diagnosis": false
+      }
+    ],
+    "mapping_fields": {
+      "order_id": "id",
+      "created_at": "created_at",
+      "currency": "currency",
+      "total_amount": "order_total",
+      "customer_id": "customer_id",
+      "line_items": "line_items_count",
+      "status": "financial_status"
+    },
+    "mapping_version": 2,
+    "violations": [
+      {
+        "kind": "missing_source_field",
+        "field": "total_amount",
+        "detail": "upstream no longer returns 'order_total', which is the source for canonical field 'total_amount'",
+        "sample": [
+          "created_at",
+          "currency",
+          "customer_id",
+          "financial_status",
+          "id",
+          "line_items_count",
+          "shipping_price",
+          "subtotal"
+        ]
+      },
+      {
+        "kind": "null_in_required_field",
+        "field": "total_amount",
+        "detail": "120 record(s): null in a required field",
+        "sample": [
+          "ord_10000",
+          "ord_10001",
+          "ord_10002"
+        ]
+      }
+    ],
+    "upstream_fields_present": [
+      "created_at",
+      "currency",
+      "customer_id",
+      "financial_status",
+      "id",
+      "line_items_count",
+      "shipping_price",
+      "subtotal"
+    ],
+    "upstream_samples": [
+      {
+        "id": "ord_10000",
+        "created_at": "2026-09-01T00:00:00+00:00",
+        "currency": "EUR",
+        "shipping_price": 8.07,
+        "customer_id": "cus_0059",
+        "line_items_count": 9,
+        "financial_status": "paid",
+        "subtotal": 343.31
+      },
+      {
+        "id": "ord_10001",
+        "created_at": "2026-09-01T00:17:00+00:00",
+        "currency": "EUR",
+        "shipping_price": 6.63,
+        "customer_id": "cus_0003",
+        "line_items_count": 2,
+        "financial_status": "refunded",
+        "subtotal": 201.29
+      },
+      {
+        "id": "ord_10002",
+        "created_at": "2026-09-01T00:34:00+00:00",
+        "currency": "EUR",
+        "shipping_price": 5.5,
+        "customer_id": "cus_0057",
+        "line_items_count": 1,
+        "financial_status": "authorized",
+        "subtotal": 264.77
+      }
+    ],
+    "baseline": {
+      "order_id": {
+        "count": 120,
+        "null_rate": 0.0,
+        "kind": "categorical",
+        "mean": null,
+        "minimum": null,
+        "maximum": null,
+        "distinct": 120,
+        "examples": []
+      },
+      "created_at": {
+        "count": 120,
+        "null_rate": 0.0,
+        "kind": "categorical",
+        "mean": null,
+        "minimum": null,
+        "maximum": null,
+        "distinct": 120,
+        "examples": []
+      },
+      "currency": {
+        "count": 120,
+        "null_rate": 0.0,
+        "kind": "categorical",
+        "mean": null,
+        "minimum": null,
+        "maximum": null,
+        "distinct": 1,
+        "examples": []
+      },
+      "total_amount": {
+        "count": 120,
+        "null_rate": 0.0,
+        "kind": "numeric",
+        "mean": 232.460333,
+        "minimum": 28.6,
+        "maximum": 417.79,
+        "distinct": 120,
+        "examples": [
+          381.46,
+          223.66,
+          294.19
+        ]
+      },
+      "customer_id": {
+        "count": 120,
+        "null_rate": 0.0417,
+        "kind": "categorical",
+        "mean": null,
+        "minimum": null,
+        "maximum": null,
+        "distinct": 48,
+        "examples": []
+      },
+      "line_items": {
+        "count": 120,
+        "null_rate": 0.0,
+        "kind": "numeric",
+        "mean": 5.016667,
+        "minimum": 1,
+        "maximum": 9,
+        "distinct": 9,
+        "examples": []
+      },
+      "status": {
+        "count": 120,
+        "null_rate": 0.0,
+        "kind": "categorical",
+        "mean": null,
+        "minimum": null,
+        "maximum": null,
+        "distinct": 4,
+        "examples": []
+      }
+    },
+    "recent_mapping_history": [
+      {
+        "at": "2026-09-22T18:00:49+00:00",
+        "field": "total_amount",
+        "from": "total_price",
+        "to": "order_total",
+        "reason": "schema_drift_renamed_field: The upstream API stopped returning 'total_price' and now returns 'order_total' (plus a separate 'shipping_price'), so the required canonical field 'total_amount' resolved to null for all 120 records. The historical total_amount examples match the values now appearing unde",
+        "applied_by": "dag-healer",
+        "review": "pending"
+      }
+    ]
+  },
+  "response": {
+    "cause_class": "semantic_change",
+    "ownership": "provider",
+    "confidence": 0.9,
+    "summary": "The upstream API stopped returning 'order_total', leaving the required field total_amount null in 120 records, and now sends 'subtotal' plus a separate 'shipping_price' instead. 'subtotal' has plausible values but is not the order total the contract requires, so this is a semantic change that needs a human decision, not a safe rename.",
+    "content_check": {
+      "canonical_field": "total_amount",
+      "new_source_field": "subtotal",
+      "verdict": "different",
+      "reference_summary": "Three historical total_amount values from a prior successful import (381.46, 223.66, 294.19), with no order IDs attached. The baseline over 120 rows has mean 232.46, range 28.6 to 417.79, and no nulls.",
+      "candidate_summary": "Three current orders (ord_10000 to ord_10002, EUR) with subtotal 343.31, 201.29, 264.77 and a separate shipping_price of 8.07, 6.63, 5.50. No field that represents the full order total is present.",
+      "reason": "The contract defines total_amount as the order total and says explicitly that it is 'not a subtotal or delivery charge'. Upstream now splits the amount into 'subtotal' plus a separate 'shipping_price', which indicates that subtotal excludes at least shipping. Subtotal values fall inside the historical range, so magnitude and distribution checks would pass, but that does not make them totals. The samples are unpaired, so it is unconfirmed whether they are the same orders. If they are, each subtotal is about 90% of the historical value, and subtotal + shipping_price still falls short (e.g. 351.38 vs 381.46), which suggests tax or other charges are also excluded. shipping_price (5.50 to 8.07) is a delivery charge well below the historical minimum. This assessment rests on only three current rows."
+    },
+    "proposed_action": {
+      "type": "escalate",
+      "canonical_field": "total_amount",
+      "new_source_field": null,
+      "rationale": "No single upstream field carries the order total. Remapping to 'subtotal' would pass validation while likely understating revenue, and 'shipping_price' is a delivery charge. Restoring total_amount needs either the provider to bring back a total field or an agreed derivation (subtotal + shipping + any tax/fees), and both are outside remap scope. Retrying will not help because the field is gone from the upstream schema; this is not an intermittent failure. total_amount was also auto-remapped total_price->order_total at 18:00:49 today (review still pending), and that source is already gone, so a human should review both changes together."
+    }
+  },
+  "cli_metadata": {
+    "model_usage": {
+      "claude-opus-5-5": {
+        "inputTokens": 2,
+        "outputTokens": 15096,
+        "cacheReadInputTokens": 1459,
+        "cacheCreationInputTokens": 4648,
+        "webSearchRequests": 0,
+        "costUSD": 0.33940380000000003,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 14183,
+        "canonicalModel": "claude-opus-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "is_error": false
+  },
+  "resolution": {
+    "outcome": "escalated",
+    "changed": false,
+    "reasons": [
+      "policy says 'semantic_change' is never repaired automatically",
+      "the diagnosis itself asked for a human"
+    ],
+    "checks": [
+      {
+        "gate": "policy",
+        "passed": false,
+        "detail": "policy says 'semantic_change' is never repaired automatically"
+      },
+      {
+        "gate": "policy",
+        "passed": true,
+        "detail": "confidence 0.90 clears the 0.60 threshold"
+      },
+      {
+        "gate": "allowlist",
+        "passed": false,
+        "detail": "the diagnosis itself asked for a human"
+      }
+    ]
+  },
+  "protected_files_unchanged": {
+    "orders.mapping.yml": true,
+    "orders.baseline.json": true,
+    "warehouse.sqlite": true
+  },
+  "import_after_repair": null
+}

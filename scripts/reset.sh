@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 cat > mappings/orders.mapping.yml <<'YAML'
 # Upstream-to-canonical field mapping for `orders`.
 #
-# This is the ONLY file the reliability layer is allowed to modify, and only
+# This is the only configuration file the repair may modify, and only
 # by rewriting the `source` of an existing canonical field. It cannot add or
 # remove canonical fields, cannot touch the contract, and cannot touch code.
 # Every change bumps `version` and is recorded in `history`.
@@ -26,5 +26,5 @@ fields:
 history: []
 YAML
 
-rm -f baselines/*.json incidents/*.json incidents/*.md data/*.sqlite data/api_state.json
+rm -f baselines/*.json incidents/*.json incidents/*.md incidents/*.resolution.json data/*.sqlite data/api_state.json
 echo "reset: mapping v1, no baseline, no incidents"

@@ -27,6 +27,9 @@ DEFAULT_STATE: dict[str, Any] = {
     # Renames total_price -> order_total, the way a merchant might during a
     # platform upgrade, without a deprecation window.
     "rename_total_price": False,
+    # Replaces total_price with `subtotal`: a different quantity, close enough
+    # in magnitude that a comparison of averages will not notice.
+    "rename_to_subtotal": False,
     # Returns 503 on the next N calls, to exercise the transient path.
     "fail_next": 0,
     # Returns 429 with Retry-After.
@@ -72,7 +75,11 @@ def generate_orders(state: dict[str, Any]) -> list[dict[str, Any]]:
             "line_items_count": rng.randint(1, 9),
             "financial_status": rng.choice(statuses),
         }
-        if state["rename_total_price"]:
+        if state["rename_to_subtotal"]:
+            # Net of a discount: not the total, but within a quarter of it.
+            order["subtotal"] = round(total * 0.90, 2)
+            del order["total_price"]
+        elif state["rename_total_price"]:
             order["order_total"] = order.pop("total_price")
         orders.append(order)
 

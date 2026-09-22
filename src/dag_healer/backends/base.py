@@ -33,6 +33,28 @@ class ProposedAction:
 
 
 @dataclass
+class ContentCheck:
+    """The model's assessment of values, not an independent semantic guarantee."""
+
+    canonical_field: str = ""
+    new_source_field: str = ""
+    verdict: str = "insufficient_evidence"
+    reference_summary: str = ""
+    candidate_summary: str = ""
+    reason: str = ""
+
+    @staticmethod
+    def from_dict(raw: Any) -> "ContentCheck | None":
+        if not isinstance(raw, dict):
+            return None
+        return ContentCheck(**{
+            name: value if isinstance(value := raw.get(name), str) else ""
+            for name in ("canonical_field", "new_source_field", "verdict",
+                         "reference_summary", "candidate_summary", "reason")
+        })
+
+
+@dataclass
 class Diagnosis:
     cause_class: str
     ownership: str  # internal | customer | provider | unknown
@@ -40,6 +62,7 @@ class Diagnosis:
     summary: str
     action: ProposedAction
     raw: dict[str, Any] = field(default_factory=dict)
+    content_check: ContentCheck | None = None
 
     @staticmethod
     def from_dict(raw: dict[str, Any]) -> "Diagnosis":
@@ -50,6 +73,7 @@ class Diagnosis:
             summary=str(raw.get("summary", "")),
             action=ProposedAction.from_dict(raw.get("proposed_action") or {}),
             raw=raw,
+            content_check=ContentCheck.from_dict(raw.get("content_check")),
         )
 
 

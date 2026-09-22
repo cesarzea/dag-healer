@@ -12,10 +12,13 @@ So a repair must also look like the column it replaces.
 from __future__ import annotations
 
 import json
+import logging
 import statistics
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,6 +30,7 @@ class FieldProfile:
     minimum: float | None = None
     maximum: float | None = None
     distinct: int | None = None
+    examples: list[Any] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -58,8 +62,35 @@ def profile_field(values: list[Any]) -> FieldProfile:
     return FieldProfile(count=count, null_rate=round(null_rate, 4), kind="other")
 
 
-def profile(records: list[dict[str, Any]], fields: list[str]) -> dict[str, FieldProfile]:
-    return {f: profile_field([r.get(f) for r in records]) for f in fields}
+def sample_values(values: list[Any]) -> list[Any]:
+    """Keep at most three distinct scalar examples, with bounded text length."""
+    samples: list[Any] = []
+    for value in values:
+        if not isinstance(value, (str, int, float, bool)):
+            continue
+        if isinstance(value, str):
+            if not value.strip() or value == "<redacted>":
+                continue
+            if len(value) > 240:
+                value = value[:226] + "...[truncated]"
+        if value not in samples:
+            samples.append(value)
+        if len(samples) == 3:
+            break
+    return samples
+
+
+def profile(
+    records: list[dict[str, Any]],
+    fields: list[str],
+    *,
+    sample_fields: set[str] | None = None,
+) -> dict[str, FieldProfile]:
+    profiles = {f: profile_field([r.get(f) for r in records]) for f in fields}
+    for name in sample_fields or ():
+        if name in profiles:
+            profiles[name].examples = sample_values([r.get(name) for r in records])
+    return profiles
 
 
 def save_baseline(path: str | Path, profiles: dict[str, FieldProfile]) -> Path:
@@ -69,6 +100,7 @@ def save_baseline(path: str | Path, profiles: dict[str, FieldProfile]) -> Path:
         json.dumps({k: v.as_dict() for k, v in profiles.items()}, indent=2) + "\n",
         encoding="utf-8",
     )
+    log.debug("WRITE %s: saved profiles for %s", p, ", ".join(profiles))
     return p
 
 
@@ -78,6 +110,31 @@ def load_baseline(path: str | Path) -> dict[str, FieldProfile]:
         return {}
     raw = json.loads(p.read_text(encoding="utf-8"))
     return {k: FieldProfile(**v) for k, v in raw.items()}
+
+
+def describe(field_name: str, candidate: FieldProfile, reference: FieldProfile) -> str:
+    """How the candidate column compares with the reference, whatever the verdict.
+
+    `compare` only speaks when something is wrong, which makes a repair that
+    passes verification look like nothing was checked. The measurements are the
+    evidence, so they are worth stating either way.
+    """
+    if candidate.kind != reference.kind:
+        return f"'{field_name}' kind {reference.kind} -> {candidate.kind}"
+
+    parts = []
+    if candidate.kind == "numeric" and None not in (candidate.mean, reference.mean):
+        assert candidate.mean is not None and reference.mean is not None
+        drift = (
+            abs(candidate.mean - reference.mean) / abs(reference.mean)
+            if reference.mean
+            else 0.0
+        )
+        parts.append(
+            f"average {reference.mean:,.2f} -> {candidate.mean:,.2f} ({drift:.0%} away)"
+        )
+    parts.append(f"null rate {reference.null_rate:.2%} -> {candidate.null_rate:.2%}")
+    return f"'{field_name}' {', '.join(parts)}"
 
 
 def compare(
@@ -108,8 +165,9 @@ def compare(
         relative = abs(candidate.mean - reference.mean) / abs(reference.mean)
         if relative > mean_relative_delta:
             problems.append(
-                f"'{field_name}' mean moved from {reference.mean:g} to {candidate.mean:g} "
-                f"({relative:.0%} away, tolerance {mean_relative_delta:.0%})"
+                f"'{field_name}' average moved from {reference.mean:,.2f} to "
+                f"{candidate.mean:,.2f} ({relative:.0%} away, tolerance "
+                f"{mean_relative_delta:.0%})"
             )
 
     return problems

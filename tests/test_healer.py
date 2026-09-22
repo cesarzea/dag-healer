@@ -41,6 +41,15 @@ def diagnosis(**overrides):
     payload.update(overrides)
     if action:
         payload["proposed_action"] = {**payload["proposed_action"], **action}
+    if "content_check" not in payload:
+        payload["content_check"] = {
+            "canonical_field": payload["proposed_action"]["canonical_field"],
+            "new_source_field": payload["proposed_action"]["new_source_field"],
+            "verdict": "equivalent",
+            "reference_summary": "Historical numeric order totals.",
+            "candidate_summary": "Current numeric candidate values.",
+            "reason": "Scripted equivalence claim to exercise the remaining checks, including deliberately wrong sources.",
+        }
     return payload
 
 
@@ -77,9 +86,68 @@ def test_plausible_but_wrong_field_is_rejected_by_the_baseline(incident_path, se
     )
 
     assert resolution.outcome == "escalated"
-    assert any("mean moved" in r for r in resolution.reasons)
+    assert any("average moved" in r for r in resolution.reasons)
     assert load_mapping(settings.mapping_path).fields["total_amount"] == "total_price"
     assert resolution.report_path and resolution.report_path.exists()
+
+
+def test_the_record_shows_the_wrong_repair_cleared_every_gate_but_the_evidence(
+    incident_path, settings
+):
+    """Why the decoy is worth a demo rather than a sentence.
+
+    Policy, allowlist and structure all pass, and so does the contract check
+    inside the evidence gate. Recording only the objection would suggest the
+    proposal was obviously bad. It was not; it was one measurement away from
+    being applied.
+    """
+    resolution = run(
+        incident_path,
+        settings,
+        diagnosis(proposed_action={"new_source_field": "shipping_price"}),
+    )
+
+    failed = [c for c in resolution.checks if not c.passed]
+    assert [c.gate for c in failed] == ["evidence"]
+    assert {c.gate for c in resolution.checks if c.passed} == {
+        "policy",
+        "allowlist",
+        "structure",
+        "content",
+        "evidence",
+    }
+
+
+def test_a_duplicate_incident_does_not_repair_the_same_thing_twice(incident_path, settings):
+    """Found by running the DAGs in Airflow rather than through the CLI.
+
+    A contract failure files one incident per task attempt, so `retries: 1` on
+    the pipeline produces two incidents for one failure. Repairing the second
+    passes every gate — the candidate mapping is the live one, so the run
+    satisfies the contract and the column matches the baseline exactly — and
+    leaves a remap from a field to itself, a wrong version number, and two
+    entries in the review queue for one real change.
+    """
+    first = run(incident_path, settings, diagnosis())
+    assert first.outcome == "repaired" and first.changed
+    assert load_mapping(settings.mapping_path).version == 2
+
+    second = run(incident_path, settings, diagnosis())
+
+    assert second.outcome == "repaired"
+    assert not second.changed
+    mapping = load_mapping(settings.mapping_path)
+    assert mapping.version == 2, "a duplicate must not bump the version"
+    assert len([h for h in mapping.history if h.get("review") == "pending"]) == 1
+
+
+def test_already_applied_mapping_does_not_bypass_the_content_requirement(incident_path, settings):
+    assert run(incident_path, settings, diagnosis()).outcome == "repaired"
+    before = settings.mapping_path.read_bytes()
+    resolution = run(incident_path, settings, diagnosis(content_check=None))
+    assert resolution.outcome == "escalated" and not resolution.changed
+    assert any(c.gate == "content" and not c.passed for c in resolution.checks)
+    assert settings.mapping_path.read_bytes() == before
 
 
 def test_action_outside_the_allowlist_is_refused(incident_path, settings):
@@ -154,7 +222,7 @@ def test_transient_class_resolves_as_a_retry_without_touching_the_mapping(incide
     resolution = run(
         incident_path,
         settings,
-        diagnosis(cause_class="transient_source_error", proposed_action={"type": "retry"}),
+        diagnosis(cause_class="transient_source_error", proposed_action={"type": "retry"}, content_check=None),
     )
     assert resolution.outcome == "repaired"
     assert not resolution.review_required

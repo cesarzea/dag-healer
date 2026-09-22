@@ -6,7 +6,17 @@ __pycache__/
 logs/
 data/*.sqlite
 data/api_state.json
+data/semantic-check-*/
 incidents/*.json
+incidents/*.resolution.json
 incidents/*.escalation.md
 baselines/*.json
 .env
+.venv*/
+.airflow*/
+CONTEXT-private.md
+run.log
+.idea/
+.DS_Store
+.env.*
+!.env.example

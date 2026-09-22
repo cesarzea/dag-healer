@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -9,6 +10,11 @@ import httpx
 
 from .errors import RateLimited, SourceUnavailable
 from .mapping import Mapping
+
+# Logged rather than printed, so the retries show up in a terminal and in an
+# Airflow task log without this module deciding where output goes. A retry that
+# leaves no trace looks exactly like a call that never had a problem.
+log = logging.getLogger(__name__)
 
 
 def fetch_raw(
@@ -25,6 +31,7 @@ def fetch_raw(
     verifiable by definition: either the next call succeeds or it does not.
     """
     url = base_url.rstrip("/") + mapping.endpoint
+    log.debug("GET %s (up to %d attempts; a retry verifies itself)", url, retries + 1)
     last_error: Exception | None = None
 
     for attempt in range(retries + 1):
@@ -37,6 +44,13 @@ def fetch_raw(
                 wait = float(response.headers.get("Retry-After", backoff))
                 last_error = RateLimited(f"{url} returned 429; Retry-After={wait}s")
                 if attempt < retries:
+                    log.info(
+                        "upstream said no (%s); waiting %.1fs, attempt %d of %d",
+                        last_error,
+                        min(wait, 5.0),
+                        attempt + 2,
+                        retries + 1,
+                    )
                     time.sleep(min(wait, 5.0))
                     continue
             elif response.status_code >= 500:
@@ -50,6 +64,7 @@ def fetch_raw(
             else:
                 payload = response.json()
                 records = payload.get(mapping.records_path, [])
+                log.debug("upstream returned %d records", len(records) if isinstance(records, list) else 0)
                 if not isinstance(records, list):
                     raise SourceUnavailable(
                         f"expected a list at '{mapping.records_path}', got {type(records).__name__}"
@@ -57,6 +72,12 @@ def fetch_raw(
                 return records
 
         if attempt < retries:
+            log.info(
+                "upstream said no (%s); retrying, attempt %d of %d",
+                last_error,
+                attempt + 2,
+                retries + 1,
+            )
             time.sleep(backoff * (2**attempt))
 
     assert last_error is not None

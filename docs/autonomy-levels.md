@@ -8,21 +8,33 @@ proposed it?** Confidence scores are an input, never a licence.
 
 *Transient source errors, rate limits, safe retries.*
 
-Verification is free, because retrying **is** the test: the next call either
-succeeds or it does not. No state changes, nothing to review.
+Retrying the source request **is** the availability test: the next call either
+succeeds or it does not. It changes no mapping and needs no model diagnosis.
+If extraction succeeds, the normal import still validates and loads the data.
+Exhausted HTTP retries currently raise without creating a structured incident.
 
-## Level 1: automatic, held for review
+## Level 1: automatic, recorded for review
 
 *A known schema adaptation whose result can be checked mechanically.*
 
 Implemented here for one case: an upstream field that was renamed. The repair
-is applied only if a fresh run satisfies the contract and the remapped column
-still resembles the column it replaces. The change bumps the mapping version,
+must pass policy, allowlist and structure checks, provide a complete equivalent
+content assessment with old and new examples, and pass a fresh contract and
+baseline check. The content gate checks the assessment, not its semantic truth.
+The change bumps the mapping version,
 is recorded in `history` with `review: pending`, and is visible in
-`dag-healer status`.
+`PYTHONPATH=src .venv/bin/python -m dag_healer.cli status`.
 
-The review is not ceremony. The verification proves the new column behaves like
-the old one; it cannot prove that is what the merchant intended.
+The pipeline can resume with the applied change before anyone reviews it. This
+demo records pending review; it does not implement an approval gate or screen.
+
+The verification checks whether the new column resembles the old one; it
+cannot prove that is what the merchant intended. Phase 8 of the guided demo
+shows an incorrect subtotal mapping passing all checks and loading wrong
+amounts in an isolated copy. The recorded change lets a human inspect that
+decision afterwards; it does not quarantine data, undo the load or backfill
+affected reports. A successful load also refreshes the baseline, which can
+make the wrong amounts the next reference.
 
 ## Level 2: proposed, never applied
 
@@ -36,16 +48,20 @@ request a human merges. Until that exists, code changes escalate.
 
 *Semantic change, type changes, removed fields, data-quality violations.*
 
-When a merchant adds a status code, or a field's meaning shifts while its type
-stays put, the question is what the data means. Nothing in the payload answers
-that, so no amount of verification substitutes for asking. The layer's job here
-is to make the ask cheap: the escalation report arrives with the violations,
-the fields actually seen, the current mapping and the diagnosis already
-assembled.
+These rules apply to the `cause_class` supplied by the diagnosis. The model
+can infer a possible change of meaning from names and context, but Python does
+not independently validate that classification. The guarantee is that a
+`semantic_change` diagnosis is rejected, not that every semantic change is
+recognized. An incorrect rename classification may reach and pass the data
+checks. The escalation report gathers the violations, fields received, mapping
+and diagnosis so a person can investigate the meaning with additional context.
 
 ## Why not just raise the confidence threshold
 
 Because confidence and correctness come apart in exactly the case that matters.
 The `shipping_price` decoy in the tests is a repair a model can propose with
-high confidence and clean reasoning, and it is wrong in a way that no contract
-check catches. Thresholds filter noise. Verification catches this.
+high confidence and plausible numeric observations, and it is wrong in a way
+that no contract check catches. The controlled diagnosis also asserts false
+content equivalence. The baseline rejects that particular proposal. The subtotal
+counterexample in phase 8 passes it, showing why neither confidence nor a
+matching profile proves that a repair preserves meaning.

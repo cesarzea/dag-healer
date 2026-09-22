@@ -6,6 +6,7 @@ happens when the pipeline fails.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,8 @@ from .contracts import load_contract, validate
 from .errors import ContractViolation, Violation
 from .extract import fetch_raw
 from .mapping import Mapping, load_mapping
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -57,6 +60,7 @@ def _missing_source_violations(mapping: Mapping, raw: list[dict[str, Any]]) -> l
 
 def dry_run(mapping: Mapping, settings: Settings) -> DryRunResult:
     """Fetch and map with a candidate mapping, without loading anything anywhere."""
+    log.debug("dry run: fetching and mapping with the candidate, loading nothing")
     contract = load_contract(settings.contract_path)
     raw = fetch_raw(mapping, settings.base_url)
     mapped = mapping.apply(raw)
@@ -88,11 +92,14 @@ def load_to_warehouse(
     ]
 
     with sqlite3.connect(path) as conn:
+        log.debug("SQL BEGIN %s: full refresh of %s with %d rows", path, table, len(rows))
         conn.execute(f"CREATE TABLE IF NOT EXISTS {table} ({column_defs})")
         conn.execute(f"DELETE FROM {table}")
         conn.executemany(
             f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", rows
         )
+
+    log.debug("SQL COMMIT %s: %d rows loaded into %s", path, len(rows), table)
 
     return len(rows)
 
@@ -105,13 +112,23 @@ def run_ingest(
 ) -> RunResult:
     """Run the pipeline. On a contract failure, write an incident and raise."""
     contract = load_contract(settings.contract_path)
+    log.debug("contract loaded: %d canonical fields downstream depends on", len(contract.fields))
     mapping = load_mapping(settings.mapping_path)
+    log.debug("mapping v%d loaded: this is where upstream change is absorbed", mapping.version)
 
     raw = fetch_raw(mapping, settings.base_url)
     mapped = mapping.apply(raw)
+    log.debug("projected %d records onto the canonical field names", len(mapped))
+
+    log.debug("checking the mapped records against the contract")
     violations = _missing_source_violations(mapping, raw) + validate(mapped, contract)
 
     if violations:
+        log.debug("%d violation(s); nothing will be loaded", len(violations))
+        log.debug(
+            "gathering evidence now, while it still exists: contract, mapping, "
+            "violations, upstream fields, redacted samples, last known-good profile"
+        )
         error = ContractViolation(entity=contract.entity, violations=violations)
         inc = incident_mod.build(
             error=error,
@@ -125,8 +142,16 @@ def run_ingest(
         path = inc.save(settings.incidents_dir)
         raise ContractViolationWithIncident(error, path) from error
 
+    log.debug("contract satisfied; loading")
     rows = load_to_warehouse(mapped, contract.field_names, settings)
-    profiles = baseline_mod.profile(mapped, contract.field_names)
+    log.debug("profiling %d columns to record what a good run looks like", len(contract.field_names))
+    sample_fields = {
+        f.name for f in contract.fields
+        if f.sample_for_diagnosis is True
+        and not incident_mod.is_sensitive_field(f.name)
+        and not incident_mod.is_sensitive_field(mapping.fields.get(f.name, ""))
+    }
+    profiles = baseline_mod.profile(mapped, contract.field_names, sample_fields=sample_fields)
     baseline_mod.save_baseline(settings.baseline_path, profiles)
 
     return RunResult(ok=True, rows=rows, mapping_version=mapping.version, profiles=profiles)

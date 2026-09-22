@@ -8,6 +8,8 @@ the incident at the moment it fails, while the context is still in memory.
 
 from __future__ import annotations
 
+import logging
+
 import datetime as _dt
 import json
 import uuid
@@ -20,14 +22,20 @@ from .errors import ContractViolation
 from .mapping import Mapping
 
 _SAMPLE_ROWS = 3
-# Fields never included in an incident, because incidents get written to disk,
-# sent to a model and read by humans who do not need them.
+# Replace values of these top-level sample fields before storing or sending
+# them for diagnosis. This is a name-based filter, not recursive PII detection.
+log = logging.getLogger(__name__)
+
 _REDACT = {"email", "phone", "address", "customer_email", "billing_address", "token"}
+
+
+def is_sensitive_field(name: str) -> bool:
+    return name.lower() in _REDACT
 
 
 def _redact(record: dict[str, Any]) -> dict[str, Any]:
     return {
-        k: ("<redacted>" if k.lower() in _REDACT else v)
+        k: ("<redacted>" if is_sensitive_field(k) else v)
         for k, v in record.items()
     }
 
@@ -74,6 +82,7 @@ class Incident:
         d.mkdir(parents=True, exist_ok=True)
         p = d / f"{self.incident_id}.json"
         p.write_text(json.dumps(self.as_dict(), indent=2, default=str) + "\n", encoding="utf-8")
+        log.debug("WRITE %s: incident=%s, violations=%d, samples=%d", p, self.incident_id, len(self.violations), len(self.upstream_samples))
         return p
 
     @staticmethod
@@ -104,7 +113,9 @@ def build(
         error_type=type(error).__name__,
         error_message=str(error),
         contract_fields=[
-            {"name": f.name, "type": f.type, "required": f.required} for f in contract.fields
+            {"name": f.name, "type": f.type, "required": f.required,
+             "description": f.description, "sample_for_diagnosis": f.sample_for_diagnosis}
+            for f in contract.fields
         ],
         mapping_fields=dict(mapping.fields),
         mapping_version=mapping.version,

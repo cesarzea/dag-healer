@@ -2,22 +2,23 @@
 #
 # Note: the reliability layer falls back to its deterministic backend inside
 # these containers, because Claude Code lives on your machine, not in here. To
-# watch the real diagnosis run, use the no-Docker path in the README.
+# watch the real diagnosis run, use scripts/demo.sh: diagnosis stays on the
+# host even when the script starts the fake API in Docker.
 services:
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
     ports:
-      - "8099:8099"
+      - "127.0.0.1:8099:8099"
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx;httpx.get('http://localhost:8099/health').raise_for_status()"]
+      test: ["CMD", "python", "-c", "import httpx;httpx.get('http://127.0.0.1:8099/health').raise_for_status()"]
       interval: 5s
       timeout: 3s
       retries: 10
 
   airflow:
-    image: apache/airflow:2.11.0-python3.11
+    image: apache/airflow:3.3.2
     depends_on:
       api:
         condition: service_healthy
@@ -27,10 +28,16 @@ services:
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
       PYTHONPATH: /opt/airflow/repo/src
       SHOP_API_URL: http://api:8099
-      _AIRFLOW_WWW_USER_USERNAME: airflow
-      _AIRFLOW_WWW_USER_PASSWORD: airflow
+      # Open the UI with no login. `airflow standalone` otherwise creates an
+      # `admin` user with a random password written to a file inside the
+      # container, which is a poor first five minutes for anyone who just
+      # cloned this. The _AIRFLOW_WWW_USER_* variables that used to be here did
+      # nothing: they belong to the official compose file's init service, not to
+      # standalone. This is a throwaway demo container on localhost; do not
+      # copy this line into anything real.
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
     volumes:
       - .:/opt/airflow/repo
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     command: bash -c "airflow db migrate && airflow standalone"

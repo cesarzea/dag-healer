@@ -10,6 +10,14 @@ def mapping(project):
     return load_mapping(project / "mappings" / "orders.mapping.yml")
 
 
+def test_the_suite_does_not_inherit_a_repaired_mapping_from_the_working_tree(mapping):
+    # Running the demo leaves the real mapping at v2. If the fixtures copied it,
+    # every expectation below would depend on who ran what last.
+    assert mapping.version == 1
+    assert mapping.fields["total_amount"] == "total_price"
+    assert mapping.history == []
+
+
 def test_apply_projects_onto_canonical_names(mapping):
     out = mapping.apply([{"id": "ord_1", "total_price": 10.0, "noise": "ignored"}])
     assert out[0]["order_id"] == "ord_1"
@@ -53,3 +61,12 @@ def test_save_and_reload_roundtrips(mapping, project):
     updated = mapping.with_remap("total_amount", "order_total", reason="r")
     path = updated.save(project / "mappings" / "orders.mapping.yml")
     assert load_mapping(path).fields["total_amount"] == "order_total"
+
+
+def test_an_automated_repair_does_not_rewrite_the_header_stating_its_own_limits(
+    mapping, project
+):
+    path = project / "mappings" / "orders.mapping.yml"
+    header_before = path.read_text().split("entity:")[0]
+    mapping.with_remap("total_amount", "order_total", reason="r").save(path)
+    assert path.read_text().startswith(header_before)

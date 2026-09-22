@@ -45,7 +45,7 @@ def load_policy(path: str | Path) -> Policy:
 class Settings:
     root: Path = ROOT
     entity: str = "orders"
-    base_url: str = field(default_factory=lambda: os.environ.get("SHOP_API_URL", "http://localhost:8099"))
+    base_url: str = field(default_factory=lambda: os.environ.get("SHOP_API_URL", "http://127.0.0.1:8099"))
 
     @property
     def contract_path(self) -> Path:

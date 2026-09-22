@@ -1,34 +1,64 @@
 """The reliability layer DAG.
 
-Triggered by a failing pipeline, never scheduled. It diagnoses one incident,
-applies a repair only if the repair survives verification, and re-runs the
-origin pipeline if it did. Everything else becomes an escalation with the
-evidence already assembled.
+Drains the incident queue. For each pending incident it produces a diagnosis,
+puts that diagnosis through the gates in `dag_healer.healer`, and either
+applies a repair that passes the configured checks or files an escalation with evidence
+assembled.
+
+It waits on the queue rather than being triggered by the failing pipeline,
+because the queue is the interface. The producer does not call this DAG;
+the consumer currently uses one entity's settings and re-triggers
+`orders_ingest` by name. Supporting other pipelines requires routing changes.
+The sensor defers to the triggerer, which polls the shared directory every
+five seconds while releasing the worker slot. This is local filesystem
+polling, not a distributed event bus. See `dag_healer.triggers`.
 """
 
 from __future__ import annotations
 
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 import pendulum
-from airflow.decorators import dag, task
+
+try:  # Airflow 3
+    from airflow.sdk import dag, task
+except ImportError:  # pragma: no cover - Airflow 2
+    from airflow.decorators import dag, task
+
+try:  # Airflow 3 moved the standard operators into their own provider
+    from airflow.providers.standard.operators.trigger_dagrun import (
+        TriggerDagRunOperator,
+    )
+except ImportError:  # pragma: no cover - Airflow 2
+    from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from dag_healer import queue as queue_mod  # noqa: E402
 from dag_healer.config import Settings, load_policy  # noqa: E402
 from dag_healer.healer import heal  # noqa: E402
+from dag_healer.triggers import IncidentSensor  # noqa: E402
 
 DAG_ID = "reliability_layer"
+
+# Each scheduled run arms a deferred sensor that polls until an incident
+# appears or its timeout expires. The timeout leaves thirty seconds before
+# the next scheduled run; scheduling delays can extend that gap. Detection
+# latency therefore also depends on whether a sensor is currently waiting.
+SCHEDULE_SECONDS = 5 * 60
+SENSOR_GIVE_UP_AFTER = SCHEDULE_SECONDS - 30
 
 
 def _backend():
     """Claude Code if it is on PATH, otherwise the deterministic stand-in.
 
-    Falling back rather than failing keeps the DAG runnable in CI, where there
-    is no model and no need for one: the tests are about the gates.
+    Falling back rather than failing keeps this runnable in CI and in the
+    containers, where there is no model and no need for one: what is being
+    exercised is the gates.
     """
     from dag_healer.backends.claude_code import ClaudeCodeBackend
     from dag_healer.backends.mock import MockBackend
@@ -39,7 +69,7 @@ def _backend():
 
 @dag(
     dag_id=DAG_ID,
-    schedule=None,
+    schedule=timedelta(seconds=SCHEDULE_SECONDS),
     start_date=pendulum.datetime(2026, 9, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,
@@ -47,43 +77,62 @@ def _backend():
     doc_md=__doc__,
 )
 def reliability_layer():
-    @task(task_id="diagnose_and_verify")
-    def diagnose_and_verify(**context) -> dict:
-        conf = (context["dag_run"].conf or {}) if context.get("dag_run") else {}
-        incident_path = conf.get("incident_path")
-        if not incident_path:
-            raise ValueError("this DAG must be triggered with conf.incident_path")
+    wait = IncidentSensor(
+        task_id="wait_for_an_incident",
+        incidents_dir=str(Settings(root=REPO_ROOT).incidents_dir),
+        poll_seconds=5,
+        timeout=SENSOR_GIVE_UP_AFTER,
+        # An empty queue is the normal state, not a failure. Skipping leaves a
+        # run history that reads honestly: nothing happened because nothing
+        # broke.
+        soft_fail=True,
+    )
 
+    @task(task_id="drain_incident_queue")
+    def drain_incident_queue() -> dict:
         settings = Settings(root=REPO_ROOT)
-        resolution = heal(
-            incident_path, settings, _backend(), load_policy(settings.policy_path)
-        )
+        policy = load_policy(settings.policy_path)
+        backend = _backend()
 
-        print(f"[{resolution.incident_id}] {resolution.summary()}")
-        for reason in resolution.reasons:
-            print(f"  - {reason}")
+        outcomes = {"repaired": 0, "escalated": 0, "changed": 0}
+        for incident_path in queue_mod.pending(settings.incidents_dir):
+            resolution = heal(incident_path, settings, backend, policy)
+            outcomes[resolution.outcome] = outcomes.get(resolution.outcome, 0) + 1
+            outcomes["changed"] += int(resolution.changed)
+            print(f"[{resolution.incident_id}] {resolution.summary()}")
+            # Every gate, not only the objections: a task log that records what
+            # was verified is the difference between an audit trail and a claim.
+            for check in resolution.checks:
+                print(f"    {check}")
 
-        return {
-            "outcome": resolution.outcome,
-            "incident_id": resolution.incident_id,
-            "origin_dag": conf.get("origin_dag"),
-            "report": str(resolution.report_path) if resolution.report_path else None,
-        }
+        return outcomes
 
-    @task.short_circuit(task_id="was_repaired")
-    def was_repaired(resolution: dict) -> bool:
-        return resolution["outcome"] == "repaired"
+    @task.short_circuit(task_id="anything_repaired")
+    def anything_repaired(outcomes: dict) -> bool:
+        """Re-run the pipeline only if a repair survived verification and changed something.
 
-    @task(task_id="rerun_origin_pipeline")
-    def rerun_origin_pipeline(resolution: dict) -> str:
-        from airflow.api.common.trigger_dag import trigger_dag
+        A duplicate incident resolves as repaired without touching the mapping.
+        Re-running on that would start a pipeline for a fix that was already in
+        place on the previous pass.
+        """
+        return outcomes.get("changed", 0) > 0
 
-        origin = resolution.get("origin_dag") or "orders_ingest"
-        trigger_dag(dag_id=origin, conf={"triggered_by": DAG_ID}, replace_microseconds=False)
-        return origin
+    rerun = TriggerDagRunOperator(
+        task_id="rerun_orders_ingest",
+        trigger_dag_id="orders_ingest",
+        # One pipeline in this demo. With several, this becomes a dynamic
+        # mapping over the origin DAGs named in the resolutions.
+        conf={"triggered_by": DAG_ID},
+        reset_dag_run=True,
+        wait_for_completion=False,
+    )
 
-    resolution = diagnose_and_verify()
-    rerun_origin_pipeline(resolution).set_upstream(was_repaired(resolution))
+    # Bound to the drain, not to the short circuit: `wait >> anything_repaired(
+    # drain_incident_queue())` chains the sensor to the wrong end of the
+    # expression and leaves the queue being drained in parallel with the wait.
+    drained = drain_incident_queue()
+    wait >> drained
+    anything_repaired(drained) >> rerun
 
 
 dag_object = reliability_layer()

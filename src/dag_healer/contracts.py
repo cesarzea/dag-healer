@@ -31,6 +31,8 @@ class FieldSpec:
     min: float | None = None
     max: float | None = None
     allowed: list[str] | None = None
+    description: str | None = None
+    sample_for_diagnosis: bool = False
 
 
 @dataclass

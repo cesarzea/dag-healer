@@ -1,43 +1,19 @@
 #!/usr/bin/env bash
-# The whole loop, end to end, in one terminal.
-#
-#   ./scripts/demo.sh            diagnose with Claude Code (needs `claude` on PATH)
-#   ./scripts/demo.sh mock       diagnose with the deterministic stand-in
+# Interactive walkthrough. Use --no-pause for an unattended recording.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BACKEND="${1:-claude-code}"
-PY=".venv/bin/python"
-export PYTHONPATH=src
-export SHOP_API_URL="${SHOP_API_URL:-http://localhost:8099}"
-
-if ! curl -sSf "$SHOP_API_URL/health" >/dev/null 2>&1; then
-  echo "The fake upstream is not running. In another terminal:  make api" >&2
+if [ ! -x .venv/bin/python ]; then
+  printf '%s\n' 'The demo needs its Python environment. Run make install, then try again.' >&2
   exit 1
 fi
 
-rule() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+if ! .venv/bin/python -c 'import httpx, yaml' >/dev/null 2>&1; then
+  printf '%s\n' 'The Python environment is incomplete. Run make install, then try again.' >&2
+  exit 1
+fi
 
-./scripts/reset.sh >/dev/null
-./scripts/inject_failure.sh reset >/dev/null
-
-rule "1. A healthy run. This is what establishes the profile we later compare against."
-$PY -m dag_healer.cli ingest
-
-rule "2. The merchant renames total_price to order_total. Nobody tells us."
-./scripts/inject_failure.sh rename >/dev/null
-echo "   upstream schema changed"
-
-rule "3. The next run fails, and files an incident with its evidence."
-set +e
-$PY -m dag_healer.cli ingest
-set -e
-
-rule "4. The reliability layer diagnoses it, and has to prove the repair before applying it."
-$PY -m dag_healer.cli heal --latest --backend "$BACKEND"
-
-rule "5. The pipeline runs clean again."
-$PY -m dag_healer.cli ingest
-
-rule "6. The change is recorded, and waiting for a human to confirm it."
-$PY -m dag_healer.cli status
+export PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}"
+# The Python entry point checks services and asks before starting missing ones.
+# Unbuffered output keeps startup progress and phase explanations visible.
+exec .venv/bin/python -u -m dag_healer.demo "$@"
