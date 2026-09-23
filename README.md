@@ -23,6 +23,9 @@ two ways: a failed run arrives with its diagnosis and evidence ready, and the
 recurring failures that can be checked are repaired automatically — applied
 only after deterministic checks confirm the fix.
 
+> [!NOTE]
+> Visit [https://www.cesarzea.com/](https://www.cesarzea.com/dag-healer) for an easy quick about. 
+
 ## What it does
 
 - **Captures the evidence when a run fails its data contract.** The broken
