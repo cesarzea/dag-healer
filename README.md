@@ -24,7 +24,7 @@ recurring failures that can be checked are repaired automatically — applied
 only after deterministic checks confirm the fix.
 
 > [!NOTE]
-> Visit [https://www.cesarzea.com/](https://www.cesarzea.com/dag-healer) for an easy quick about. 
+> Visit [https://www.cesarzea.com/dag-healer/](https://www.cesarzea.com/dag-healer) for an easy quick about. 
 
 ## What it does
 
